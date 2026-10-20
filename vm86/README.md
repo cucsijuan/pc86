@@ -13,7 +13,7 @@ Both also compile as C++, so they can be dropped into an Unreal module as-is.
 |---|---|
 | CPU vs [SingleStepTests/8088](https://github.com/SingleStepTests/8088) (tests captured from a physical 8088) | 271 opcodes and groups, ~1.4 million cases, 0 failures |
 | Assembler vs NASM 2.16 (random programs) | 6,000+ programs (~275,000 lines), byte-for-byte identical output; also agrees on what to reject |
-| Error messages | 58 cases checked (text and line number) |
+| Error messages | 60 cases checked (text and line number) |
 | API tests (REP across frames, save state, IRQs, HLT, ports, far transfers...) | 28/28 |
 | Example programs (assemble + run + compare output) | 6/6 |
 | Robustness under AddressSanitizer + UBSan (6,000 broken or mutated sources) | 0 memory errors or undefined behavior |

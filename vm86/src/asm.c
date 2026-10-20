@@ -1181,6 +1181,10 @@ static int encode_instr(asm_t *A, stmt_t *s, enc_t *e)
                       s->mnem->name, s->mnem->name);
             return 0;
         }
+        if (o[1].size) {
+            add_error(A, line, 0, "%s takes the address without a size: %s si, [label]", s->mnem->name, s->mnem->name);
+            return 0;
+        }
         seg_prefix(e, &o[1]); eb(e, s->mnem->cc_or_byte); modrm(A, s, e, o[0].reg, &o[1], 1);
         return 1;
 
@@ -1246,6 +1250,10 @@ static int encode_instr(asm_t *A, stmt_t *s, enc_t *e)
         NEED(1);
         if (o[0].far_imm) {
             if (o[0].jmod == J_SHORT || o[0].jmod == J_NEAR) BAD();
+            if (o[0].jmod == J_FAR) {
+                add_error(A, line, 0, "segment:offset is already far; write it without FAR: %s 0000h:7C00h", s->mnem->name);
+                return 0;
+            }
             if (!check_word(A, line, o[0].far_seg) || !check_word(A, line, o[0].imm)) return 0;
             eb(e, id == M_CALL ? 0x9A : 0xEA); ew(e, o[0].imm.v); ew(e, o[0].far_seg.v);
             return 1;

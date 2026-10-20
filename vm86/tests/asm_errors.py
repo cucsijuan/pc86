@@ -36,6 +36,8 @@ CASES = [
     ("out 60h, bl", 1, "AL or AX"),
     ("rep add ax, bx", 1, "REP can only"),
     ("jmp far x\nx:", 1, "segment:offset"),
+    ("jmp far 0:7C00h", 1, "already far"),
+    ("lds si, word [bx]", 1, "without a size"),
     ("call far ax", 1, "invalid combination"),
     ("jmp short 0:7C00h", 1, "invalid combination"),
     ("mov ax, 0:5", 1, "only be used on JMP and CALL"),

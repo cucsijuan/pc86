@@ -129,7 +129,7 @@ Port `61h` (system control: speaker gate and data, refresh toggle) is on the mot
 include/kbd.h, src/kbd.c       keyboard (the peripheral) and its models
 include/kbc.h, src/kbc.c       8042 controller and keyboard BIOS
 include/pic.h, src/pic.c       8259 PIC
-examples/typewriter.asm        BIOS input: echoes keys and shows their codes
+examples/typewriter.asm        BIOS input: echoes keys, shows their codes, backspace and arrows
 examples/keys_game.asm         own INT 09h handler: moves a square with arrows or WASD
 tests/kbd_test.c               unit tests
 tests/integration_test.c       tests with vm86; also the reference wiring

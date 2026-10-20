@@ -15,9 +15,11 @@ next_key:
     cmp al, 27              ; Esc
     je done
     cmp al, 0E0h            ; gray keys: ASCII E0h, nothing to print
-    je next_key
+    je .special
     test al, al             ; function keys, arrows: ASCII 0
-    jz next_key
+    jz .special
+    cmp al, 8               ; Backspace
+    je .backspace
     cmp al, 13              ; Enter: new line
     jne .print
     mov ax, 0E0Dh
@@ -26,6 +28,59 @@ next_key:
 .print:
     mov ah, 0Eh
     int 10h
+    jmp next_key
+
+; The BIOS only moves the cursor for a backspace (as on a real PC), so the
+; program erases the character itself, and at the start of a line goes back
+; to the end of the previous one.
+.backspace:
+    call get_cursor
+    test dl, dl
+    jz .line_up
+    dec dl
+    call set_cursor
+    call erase
+    jmp next_key
+.line_up:
+    cmp dh, 2               ; first typing row
+    jbe next_key
+    dec dh
+    call end_of_line
+    jmp next_key
+
+; Arrows move the cursor around the typing area (rows 2-24).
+.special:
+    call get_cursor
+    cmp ah, 48h             ; up
+    je .up
+    cmp ah, 50h             ; down
+    je .down
+    cmp ah, 4Bh             ; left
+    je .left
+    cmp ah, 4Dh             ; right
+    je .right
+    jmp next_key
+.up:
+    cmp dh, 2
+    jbe next_key
+    dec dh
+    jmp .move
+.down:
+    cmp dh, 24
+    jae next_key
+    inc dh
+    jmp .move
+.left:
+    test dl, dl
+    jz next_key
+    dec dl
+    jmp .move
+.right:
+    cmp dl, 79
+    jae next_key
+    inc dl
+.move:
+    call set_cursor
     jmp next_key
 
 done:
@@ -57,11 +112,52 @@ show_codes:
     pop ax
     ret
 
-set_cursor:
+set_cursor:                 ; DH = row, DL = column
     mov ah, 02h
     xor bh, bh
     int 10h
     ret
+
+get_cursor:                 ; DH = row, DL = column (keeps AX)
+    push ax
+    push cx
+    mov ah, 03h
+    xor bh, bh
+    int 10h
+    pop cx
+    pop ax
+    ret
+
+erase:                      ; blank at the cursor, which stays there
+    mov ax, 0A20h
+    xor bh, bh
+    mov cx, 1
+    int 10h
+    ret
+
+; end_of_line: puts the cursor after the last character of row DH
+; (on the last column if the row is full)
+end_of_line:
+    mov dl, 79
+.scan:
+    call set_cursor
+    mov ah, 08h             ; read the character at the cursor
+    int 10h
+    cmp al, ' '
+    je .blank
+    test al, al
+    jne .found
+.blank:
+    test dl, dl
+    jz .done
+    dec dl
+    jmp .scan
+.found:
+    cmp dl, 79
+    jae .done
+    inc dl
+.done:
+    jmp set_cursor
 
 print:                      ; prints the 0-terminated string at SI
     lodsb

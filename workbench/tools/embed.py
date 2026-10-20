@@ -9,21 +9,23 @@ import json
 import os
 import sys
 
-# key, file (relative to the suite root), title, whether it reads the keyboard
+# key, file (relative to the suite root), title, whether it reads the keyboard,
+# whether it plays sound
 EXAMPLES = [
-    ("text_demo", "vga86/examples/text_demo.asm", "Text mode demo", False),
-    ("typewriter", "kbd86/examples/typewriter.asm", "Typewriter (keyboard through the BIOS)", True),
-    ("keys_game", "kbd86/examples/keys_game.asm", "Move a square (own keyboard handler)", True),
-    ("clock", "pc86/examples/clock.asm", "Stopwatch (timer interrupt)", True),
-    ("piano", "pc86/examples/piano.asm", "Piano (timer and speaker)", True),
-    ("bounce", "workbench/examples/bounce.asm", "Bouncing ball (mode 13h)", False),
-    ("gfx_demo", "vga86/examples/gfx_demo.asm", "Palette animation (mode 13h)", False),
-    ("hello", "vm86/examples/hello.asm", "Hello", False),
-    ("numbers", "vm86/examples/numbers.asm", "Numbers 1 to 20", False),
-    ("factorial", "vm86/examples/factorial.asm", "Recursive factorial", False),
-    ("sort", "vm86/examples/sort.asm", "Bubble sort", False),
-    ("strings", "vm86/examples/strings.asm", "String instructions", False),
-    ("interrupts", "vm86/examples/interrupts.asm", "Interrupt handlers", False),
+    ("text_demo", "vga86/examples/text_demo.asm", "Text mode demo", False, False),
+    ("typewriter", "kbd86/examples/typewriter.asm", "Typewriter (keyboard through the BIOS)", True, False),
+    ("keys_game", "kbd86/examples/keys_game.asm", "Move a square (own keyboard handler)", True, False),
+    ("clock", "pc86/examples/clock.asm", "Stopwatch (timer interrupt)", True, False),
+    ("piano", "pc86/examples/piano.asm", "Piano (timer and speaker)", True, True),
+    ("music", "pc86/examples/music.asm", "Music: Greensleeves (speaker)", True, True),
+    ("bounce", "workbench/examples/bounce.asm", "Bouncing ball (mode 13h)", False, False),
+    ("gfx_demo", "vga86/examples/gfx_demo.asm", "Palette animation (mode 13h)", False, False),
+    ("hello", "vm86/examples/hello.asm", "Hello", False, False),
+    ("numbers", "vm86/examples/numbers.asm", "Numbers 1 to 20", False, False),
+    ("factorial", "vm86/examples/factorial.asm", "Recursive factorial", False, False),
+    ("sort", "vm86/examples/sort.asm", "Bubble sort", False, False),
+    ("strings", "vm86/examples/strings.asm", "String instructions", False, False),
+    ("interrupts", "vm86/examples/interrupts.asm", "Interrupt handlers", False, False),
 ]
 
 
@@ -34,9 +36,9 @@ def main():
     with open(wasm, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("ascii")
     examples = {}
-    for key, path, title, keys in EXAMPLES:
+    for key, path, title, keys, sound in EXAMPLES:
         with open(os.path.join(root, path), encoding="utf-8") as f:
-            examples[key] = {"title": title, "source": f.read(), "keys": keys}
+            examples[key] = {"title": title, "source": f.read(), "keys": keys, "sound": sound}
     # "</" cannot appear inside a <script> element
     js = json.dumps(examples, ensure_ascii=False).replace("</", "<\\/")
     for marker in ("@WASM@", "@EXAMPLES@"):

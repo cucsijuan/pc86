@@ -613,6 +613,11 @@ ui.example.addEventListener("change", () => {
   ui.src.scrollTop = 0;
   showErrors([]);
   save();
+  // choosing a tune is a user gesture, so the browser lets the sound start
+  if (EXAMPLES[ui.example.value].sound && !ui.sound.checked) {
+    ui.sound.checked = true;
+    ui.sound.dispatchEvent(new Event("change"));
+  }
   run();
   if (EXAMPLES[ui.example.value].keys) ui.screen.focus();
 });

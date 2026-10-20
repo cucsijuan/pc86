@@ -37,12 +37,14 @@ typedef struct vga_state {
     uint8_t crtc[CRTC_REGS];
     uint8_t crtc_index;
     uint8_t blink_enabled;
+    uint8_t sense;                  /* VGA_SENSE_* of the attached monitor */
     uint64_t time_ns;
 } vga_state_t;
 
 struct vga {
     vga_state_t st;
     uint8_t *mem;
+    uint8_t frame[VGA_OUT_WIDTH * VGA_OUT_HEIGHT];   /* DAC index of every output pixel */
 };
 
 /* ---------- memory helpers ---------- */
@@ -106,11 +108,7 @@ static uint8_t luma6(const uint8_t rgb[3])
     return (uint8_t)((30u * rgb[0] + 59u * rgb[1] + 11u * rgb[2] + 50u) / 100u);
 }
 
-static void build_luma(const vga_t *v, uint8_t out[256])
-{
-    int i;
-    for (i = 0; i < 256; i++) out[i] = (uint8_t)((luma6(v->st.dac[i]) * 255u + 31u) / 63u);
-}
+static uint8_t to8(uint8_t c6) { return (uint8_t)((c6 * 255u + 31u) / 63u); }
 
 /* ---------- BIOS data area ---------- */
 
@@ -416,7 +414,8 @@ int vga_int10(vga_t *v, vga_bios_regs_t *r)
     case 0x1A:
         if (AL(r) != 0) return 0;
         SET_LO(r->ax, 0x1A);
-        r->bx = 0x0007;            /* VGA with analog monochrome display */
+        /* display combination: what the monitor ID pins say */
+        r->bx = v->st.sense == VGA_SENSE_MONO ? 0x0007 : 0x0008;
         return 1;
     default:
         return 0;
@@ -484,7 +483,7 @@ int vga_port_out(vga_t *v, uint16_t port, uint8_t value)
 
 /* ---------- rendering ---------- */
 
-static void render_text(const vga_t *v, const uint8_t luma[256], uint8_t *out)
+static void render_text(const vga_t *v, uint8_t *out)
 {
     const vga_state_t *s = &v->st;
     uint32_t frame = vga_frame_count(v);
@@ -496,7 +495,7 @@ static void render_text(const vga_t *v, const uint8_t luma[256], uint8_t *out)
     int cursor_cell = -1, row, col, y, x;
     uint8_t lut[16];
 
-    for (x = 0; x < 16; x++) lut[x] = luma[s->ac_pal[x] & 0x3F];
+    for (x = 0; x < 16; x++) lut[x] = (uint8_t)(s->ac_pal[x] & 0x3F);
     if (cursor_on && !(s->crtc[0x0A] & 0x20) && cstart <= cend) {
         int cell = (uint16_t)(cpos - start);
         if (cell >= 0 && cell < COLS_TEXT * ROWS) cursor_cell = cell;
@@ -524,7 +523,7 @@ static void render_text(const vga_t *v, const uint8_t luma[256], uint8_t *out)
     }
 }
 
-static void render_13h(const vga_t *v, const uint8_t luma[256], uint8_t *out)
+static void render_13h(const vga_t *v, uint8_t *out)
 {
     int y, x;
     for (y = 0; y < 200; y++) {
@@ -532,19 +531,55 @@ static void render_13h(const vga_t *v, const uint8_t luma[256], uint8_t *out)
         uint8_t *o1 = o0 + VGA_OUT_WIDTH;
         const uint8_t *src = v->mem + GFX_BASE + (uint32_t)y * 320;
         for (x = 0; x < 320; x++) {
-            uint8_t l = luma[src[x]];
+            uint8_t l = src[x];
             o0[2 * x] = o0[2 * x + 1] = o1[2 * x] = o1[2 * x + 1] = l;
         }
     }
 }
 
+/* Draws the screen as DAC indices into v->frame. */
+static void render_indices(vga_t *v)
+{
+    if (v->st.mode == 0x13) render_13h(v, v->frame);
+    else render_text(v, v->frame);
+}
+
 void vga_render(vga_t *v, uint8_t *out)
 {
     uint8_t luma[256];
-    build_luma(v, luma);
-    if (v->st.mode == 0x13) render_13h(v, luma, out);
-    else render_text(v, luma, out);
+    size_t i;
+    for (i = 0; i < 256; i++) luma[i] = to8(luma6(v->st.dac[i]));
+    render_indices(v);
+    for (i = 0; i < (size_t)VGA_OUT_WIDTH * VGA_OUT_HEIGHT; i++) out[i] = luma[v->frame[i]];
 }
+
+void vga_render_rgb(vga_t *v, uint8_t *out)
+{
+    uint8_t rgb[256][3];
+    size_t i;
+    for (i = 0; i < 256; i++) {
+        rgb[i][0] = to8(v->st.dac[i][0]);
+        rgb[i][1] = to8(v->st.dac[i][1]);
+        rgb[i][2] = to8(v->st.dac[i][2]);
+    }
+    render_indices(v);
+    for (i = 0; i < (size_t)VGA_OUT_WIDTH * VGA_OUT_HEIGHT; i++) {
+        const uint8_t *c = rgb[v->frame[i]];
+        out[3 * i] = c[0]; out[3 * i + 1] = c[1]; out[3 * i + 2] = c[2];
+    }
+}
+
+void vga_signal(const vga_t *v, vga_signal_t *sig)
+{
+    (void)v;                       /* both emulated modes use the same 70 Hz timing */
+    sig->width = VGA_OUT_WIDTH;
+    sig->height = VGA_OUT_HEIGHT;
+    sig->hfreq_hz = 31469;
+    sig->vfreq_mhz = 70086;
+}
+
+void vga_set_monitor_sense(vga_t *v, int sense) { v->st.sense = (uint8_t)sense; }
+void vga_set_memory(vga_t *v, uint8_t *memory) { if (memory) v->mem = memory; }
 
 /* ---------- public API ---------- */
 
@@ -563,7 +598,9 @@ void vga_destroy(vga_t *v) { free(v); }
 
 void vga_reset(vga_t *v)
 {
+    uint8_t sense = v->st.sense;   /* the monitor stays plugged in across a reset */
     memset(&v->st, 0, sizeof(v->st));
+    v->st.sense = sense;
     set_mode(v, 0x03, 1);
 }
 

@@ -9,7 +9,7 @@ CFLAGS  ?= -O2 -std=c99 -Wall -Wextra -pedantic
 CFLAGS  += -Iinclude
 BUILD   := build
 
-LIB_SRC := src/kbd.c src/pic.c
+LIB_SRC := src/kbd.c src/kbc.c src/pic.c
 LIB_OBJ := $(LIB_SRC:src/%.c=$(BUILD)/%.o)
 
 ifeq ($(OS),Windows_NT)
@@ -25,7 +25,7 @@ all: $(BUILD)/libkbd86.a $(SHARED)
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/%.o: src/%.c include/kbd.h include/pic.h | $(BUILD)
+$(BUILD)/%.o: src/%.c include/kbd.h include/kbc.h include/pic.h | $(BUILD)
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 $(BUILD)/libkbd86.a: $(LIB_OBJ)

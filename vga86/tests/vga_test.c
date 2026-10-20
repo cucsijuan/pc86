@@ -254,8 +254,33 @@ int main(void)
     CHECK(vga_mode(v) == 0x03, "a rejected mode set leaves the mode unchanged");
 
     /* --- identification --- */
+    vga_set_monitor_sense(v, VGA_SENSE_MONO);
     int10(v, 0x1A00, 0, 0, 0, &r);
-    CHECK((r.ax & 0xFF) == 0x1A && (r.bx & 0xFF) == 0x07, "AX=1A00h identifies a VGA with monochrome analog display");
+    CHECK((r.ax & 0xFF) == 0x1A && (r.bx & 0xFF) == 0x07, "AX=1A00h with a mono monitor: VGA with monochrome analog display");
+    vga_set_monitor_sense(v, VGA_SENSE_COLOR);
+    int10(v, 0x1A00, 0, 0, 0, &r);
+    CHECK((r.bx & 0xFF) == 0x08, "with a color monitor: VGA with color analog display");
+    vga_set_monitor_sense(v, VGA_SENSE_NONE);
+    int10(v, 0x1A00, 0, 0, 0, &r);
+    CHECK((r.bx & 0xFF) == 0x08, "with nothing plugged in the BIOS assumes color");
+
+    /* --- RGB signal --- */
+    {
+        static uint8_t rgb[VGA_OUT_WIDTH * VGA_OUT_HEIGHT * 3], lum[VGA_OUT_WIDTH * VGA_OUT_HEIGHT];
+        vga_signal_t sig;
+        int10(v, 0x0013, 0, 0, 0, NULL);
+        mem[0xA0000] = 4;                              /* default palette 4: red 42,0,0 */
+        mem[0xA0001] = 15;                             /* white */
+        vga_render_rgb(v, rgb);
+        vga_render(v, lum);
+        CHECK(rgb[0] == 170 && rgb[1] == 0 && rgb[2] == 0 && rgb[6] == 255 && rgb[7] == 255 && rgb[8] == 255,
+              "vga_render_rgb gives the DAC colors scaled to 8 bits");
+        CHECK(lum[0] == 53 && lum[2] == 255, "vga_render gives the same picture as luminance");
+        vga_signal(v, &sig);
+        CHECK(sig.width == 640 && sig.height == 400 && sig.hfreq_hz == 31469 && sig.vfreq_mhz == 70086,
+              "the signal: 640x400, 31.5 kHz, 70 Hz");
+        int10(v, 0x0003, 0, 0, 0, NULL);
+    }
 
     /* --- save / load state --- */
     {

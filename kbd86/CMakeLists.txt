@@ -10,10 +10,10 @@ else()
   add_compile_options(-Wall -Wextra -pedantic)
 endif()
 
-add_library(kbd86 STATIC src/kbd.c src/pic.c)
+add_library(kbd86 STATIC src/kbd.c src/kbc.c src/pic.c)
 target_include_directories(kbd86 PUBLIC include)
 
-add_library(kbd86_shared SHARED src/kbd.c src/pic.c)
+add_library(kbd86_shared SHARED src/kbd.c src/kbc.c src/pic.c)
 target_include_directories(kbd86_shared PUBLIC include)
 target_compile_definitions(kbd86_shared PRIVATE KBD86_BUILD_DLL)
 set_target_properties(kbd86_shared PROPERTIES OUTPUT_NAME kbd86)

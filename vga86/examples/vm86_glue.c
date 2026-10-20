@@ -13,6 +13,8 @@
  *   2. call vga_render() once per engine frame and upload the 640x400
  *      luminance buffer to a texture.
  *
+ * For a whole machine (timer, keyboard, slots, monitors) see pc86.
+ *
  * Requires vm86 (the CPU core), which is a separate package:
  *   make demo VM86_DIR=../vm86
  */

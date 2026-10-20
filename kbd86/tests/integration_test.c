@@ -2,7 +2,8 @@
  * Integration tests with the vm86 CPU core and assembler (separate package).
  * Build with: make test-integration VM86_DIR=../vm86
  *
- * The rig below is also the reference for wiring keyboard + PIC + CPU:
+ * The rig below is also the reference for wiring keyboard + controller + PIC + CPU
+ * (pc86 does the same for a whole machine):
  *   - INT 09h and INT 16h vectors point at BIOS "ROM" addresses; while they
  *     still do, the host services them in C. A program that installs its own
  *     handler changes the vector and gets the real behavior.
@@ -10,6 +11,7 @@
  *     PIC, and deliver the PIC's interrupt to the CPU if IF=1.
  */
 #include "asm86.h"
+#include "kbc.h"
 #include "kbd.h"
 #include "pic.h"
 #include "vm86.h"
@@ -29,6 +31,7 @@ static int fails = 0;
 typedef struct {
     vm86_t *cpu;
     kbd_t *kbd;
+    kbc_t *kbc;
     pic_t pic;
     int bad_port;
 } rig_t;
@@ -52,8 +55,8 @@ static uint8_t r_in8(void *u, uint16_t port)
 {
     rig_t *r = (rig_t *)u;
     uint8_t v = 0xFF;
-    int a = kbd_port_in(r->kbd, port, &v);
-    if (a == KBD_PORT_NOT_MINE) a = pic_port_in(&r->pic, port, &v);
+    int a = kbc_port_in(r->kbc, port, &v);
+    if (a == KBC_PORT_NOT_MINE) a = pic_port_in(&r->pic, port, &v);
     if (a != 1) { r->bad_port = port; vm86_stop(r->cpu); }
     return v;
 }
@@ -61,8 +64,8 @@ static uint8_t r_in8(void *u, uint16_t port)
 static void r_out8(void *u, uint16_t port, uint8_t value)
 {
     rig_t *r = (rig_t *)u;
-    int a = kbd_port_out(r->kbd, port, value);
-    if (a == KBD_PORT_NOT_MINE) a = pic_port_out(&r->pic, port, value);
+    int a = kbc_port_out(r->kbc, port, value);
+    if (a == KBC_PORT_NOT_MINE) a = pic_port_out(&r->pic, port, value);
     if (a != 1) { r->bad_port = port; vm86_stop(r->cpu); }
 }
 
@@ -71,21 +74,21 @@ static int r_int(void *u, vm86_t *vm, uint8_t n)
     rig_t *r = (rig_t *)u;
     vm86_regs_t *g = vm86_regs(vm);
     if (n == 0x09 && vector(vm, 0x09) == BIOS_INT09) {
-        kbd_bios_irq(r->kbd);
+        kbc_bios_irq(r->kbc);
         pic_eoi(&r->pic);
         return 1;
     }
     if (n == 0x16 && vector(vm, 0x16) == BIOS_INT16) {
-        kbd_bios_regs_t b;
+        kbc_bios_regs_t b;
         int res;
         b.ax = g->ax; b.bx = g->bx; b.cx = g->cx; b.dx = g->dx; b.flags = g->flags;
-        res = kbd_int16(r->kbd, &b);
-        if (res == KBD_BIOS_WAIT) {
+        res = kbc_int16(r->kbc, &b);
+        if (res == KBC_BIOS_WAIT) {
             g->ip -= 2;              /* run INT 16h again */
             g->flags |= VM86_IF;     /* the BIOS waits with interrupts enabled (STI) */
             return 1;
         }
-        if (res == KBD_BIOS_UNSUPPORTED) { vm86_stop(vm); return 1; }
+        if (res == KBC_BIOS_UNSUPPORTED) { vm86_stop(vm); return 1; }
         g->ax = b.ax; g->flags = (uint16_t)((g->flags & ~0x40) | (b.flags & 0x40));
         return 1;
     }
@@ -103,7 +106,14 @@ static void rig_init(rig_t *r, const char *src)
         exit(1);
     }
     r->cpu = vm86_create();
-    r->kbd = kbd_create(vm86_memory(r->cpu));
+    r->kbd = kbd_create(NULL);
+    r->kbc = kbc_create(vm86_memory(r->cpu));
+    {
+        kbc_device_t d = kbc_keyboard_device(r->kbd);
+        kbc_connect(r->kbc, &d);
+    }
+    kbd_power(r->kbd, 1);
+    kbc_reset(r->kbc);
     pic_reset(&r->pic);
     set_vector(r->cpu, 0x09, BIOS_INT09);
     set_vector(r->cpu, 0x16, BIOS_INT16);
@@ -123,7 +133,7 @@ static void rig_run(rig_t *r, int ms)
         if (st != VM86_RUNNING && st != VM86_HALTED) return;
         vm86_run(r->cpu, SLICE);
         kbd_advance(r->kbd, 40);
-        if (kbd_take_irq(r->kbd)) pic_raise(&r->pic, 1);
+        if (kbc_take_irq(r->kbc)) pic_raise(&r->pic, 1);
         if (vm86_regs(r->cpu)->flags & VM86_IF) {
             int v = pic_acknowledge(&r->pic);
             if (v >= 0) vm86_request_interrupt(r->cpu, (uint8_t)v);
@@ -133,7 +143,7 @@ static void rig_run(rig_t *r, int ms)
 
 static void type(rig_t *r, uint16_t key) { kbd_key(r->kbd, key, 1); rig_run(r, 30); kbd_key(r->kbd, key, 0); rig_run(r, 30); }
 
-static void rig_done(rig_t *r) { kbd_destroy(r->kbd); vm86_destroy(r->cpu); }
+static void rig_done(rig_t *r) { kbc_destroy(r->kbc); kbd_destroy(r->kbd); vm86_destroy(r->cpu); }
 
 static uint16_t word_at(rig_t *r, int sym_addr) { uint8_t *m = vm86_memory(r->cpu); return (uint16_t)(m[0x10000 + sym_addr] | m[0x10000 + sym_addr + 1] << 8); }
 

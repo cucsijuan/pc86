@@ -1,4 +1,4 @@
-# vga86 - monochrome VGA display device
+# vga86 - VGA card and monitors
 #
 # make                                  static + shared library
 # make test                             unit tests (no other packages needed)
@@ -12,7 +12,7 @@ CFLAGS  += -Iinclude
 LDLIBS  := -lm
 BUILD   := build
 
-LIB_SRC := src/vga.c src/font_cp437.c
+LIB_SRC := src/vga.c src/monitor.c src/font_cp437.c
 LIB_OBJ := $(LIB_SRC:src/%.c=$(BUILD)/%.o)
 
 ifeq ($(OS),Windows_NT)
@@ -28,7 +28,7 @@ all: $(BUILD)/libvga86.a $(SHARED)
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/%.o: src/%.c include/vga.h src/font_cp437.h | $(BUILD)
+$(BUILD)/%.o: src/%.c include/vga.h include/monitor.h src/font_cp437.h | $(BUILD)
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 $(BUILD)/libvga86.a: $(LIB_OBJ)
@@ -40,8 +40,12 @@ $(SHARED): $(LIB_OBJ)
 $(BUILD)/vga_test$(EXE): tests/vga_test.c $(BUILD)/libvga86.a
 	$(CC) $(CFLAGS) $< $(BUILD)/libvga86.a $(LDLIBS) -o $@
 
-test: $(BUILD)/vga_test$(EXE)
+$(BUILD)/monitor_test$(EXE): tests/monitor_test.c $(BUILD)/libvga86.a
+	$(CC) $(CFLAGS) $< $(BUILD)/libvga86.a $(LDLIBS) -o $@
+
+test: $(BUILD)/vga_test$(EXE) $(BUILD)/monitor_test$(EXE)
 	$(BUILD)/vga_test$(EXE)
+	$(BUILD)/monitor_test$(EXE)
 
 # ---- targets that need the vm86 package ----
 

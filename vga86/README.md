@@ -1,29 +1,47 @@
-# vga86 — monochrome VGA display device for an in-game virtual PC
+# vga86 — VGA card and monitors for an in-game virtual PC
 
-A C99 device with no dependencies (apart from libm) that emulates what a program sees of a VGA card connected to a **monochrome VGA monitor**, and produces the image that monitor would show.
+Two C99 pieces with no dependencies (apart from libm):
 
-It is a separate device: it does not depend on any CPU core. It reads video memory from the machine's 1 MB address space and the host routes I/O ports and `INT 10h` to it. `examples/vm86_glue.c` shows the wiring for [vm86](../vm86).
+- **The VGA card** (`vga.h`): what a program sees of a VGA card — video memory in the machine's 1 MB address space, I/O ports, `INT 10h`, retrace timing — and the video signal it sends down the cable.
+- **Monitors** (`monitor.h`): the peripheral that turns that signal into the picture. Models differ in connector, sync range, color or monochrome, and phosphor persistence, and can be plugged and unplugged at any time.
+
+The card does not depend on any CPU core: the host routes I/O ports and `INT 10h` to it. `examples/vm86_glue.c` shows the wiring for [vm86](../vm86); [pc86](../pc86) puts the card in an expansion slot of a whole machine.
 
 ## Output
 
 ```
-640 x 400 pixels, 1 byte per pixel, luminance 0-255
+640 x 400 pixels: vga_render_rgb() 3 bytes per pixel (the signal), vga_render() 1 byte of luminance
 ```
 
-The size is the same in every mode, so the engine needs a single `G8` texture:
+The size is the same in every mode, so the engine needs a single texture:
 
 - **Text mode 03h:** 80x25 cells of 8x16 pixels = 640x400.
 - **Mode 13h:** 320x200, each pixel doubled to 2x2, like the real VGA double scan.
 
-Colors are converted to gray the way a monochrome VGA monitor shows them: 30% R + 59% G + 11% B of the DAC value. The engine tints the result (green phosphor) and adds screen effects. An optional, engine-independent phosphor persistence filter is included (`vga_phosphor_*`).
+A monochrome monitor shows colors as gray the way a monochrome VGA monitor does: 30% R + 59% G + 11% B of the DAC value; the engine tints the result (green or amber phosphor) and adds screen effects. A color monitor shows the RGB.
+
+### Monitors
+
+| Model | Connector | Sync | Picture | Persistence |
+|---|---|---|---|---|
+| `MONITOR_MODEL_VGA_MONO` | VGA (DE-15) | 31–32 kHz | luminance | 30 ms |
+| `MONITOR_MODEL_VGA_COLOR` | VGA (DE-15) | 31–32 kHz | RGB | 2 ms |
+| `MONITOR_MODEL_CGA_COLOR` | digital (DE-9) | 15.5–16 kHz | RGB | 2 ms |
+| `MONITOR_MODEL_MULTISYNC` | VGA (DE-15) | 15–38 kHz | RGB | 2 ms |
+
+`monitor_display()` reports what happened: `MONITOR_SHOWING`, `MONITOR_OFF` (power switch), `MONITOR_NO_SIGNAL` (no cable, or the machine is off) or `MONITOR_OUT_OF_RANGE` (it cannot lock to the signal). The picture fades out with the phosphor's half-life instead of disappearing at once.
+
+The monitor's ID pins tell the card what is plugged in (`vga_set_monitor_sense()`); programs read it through `INT 10h AX=1A00h`, which is how they choose between a color and a gray palette. The digital CGA monitor does not fit the VGA connector; it is there for future cards.
 
 ## Status
 
 | Check | Result |
 |---|---|
-| Unit tests (modes, BIOS, ports, palette, blink, cursor, retrace timing, save state, phosphor, font) | 64/64 |
+| Unit tests (modes, BIOS, ports, palette, blink, cursor, retrace timing, RGB signal, monitor sense, save state, phosphor, font) | 69/69 |
+| Monitor tests (luminance and RGB, sync range, connector, persistence, power, no signal) | 11/11 |
 | Integration with vm86 (real programs; retrace polling at 100k–4.77M instructions/s) | 9/9 |
 | Robustness: 3 million random port/BIOS calls under AddressSanitizer + UBSan | 0 errors |
+| Unit, monitor and integration tests under AddressSanitizer + UBSan | 0 errors |
 | Demos (`examples/*.asm`), assembled with asm86 | identical to NASM, screenshots checked |
 
 Compiles without warnings as C99 and as C++17.
@@ -48,7 +66,15 @@ if (!vga_int10(vga, &regs)) { /* unsupported BIOS function: stop with an error *
 
 /* every engine frame: */
 run_cpu_in_40us_slices_calling_vga_advance();
-vga_render(vga, pixels);                     /* 640*400 bytes -> texture */
+vga_render(vga, pixels);                     /* 640*400 bytes of luminance -> texture */
+
+/* or through a monitor: */
+monitor_t *mon = monitor_create(monitor_builtin_model(MONITOR_MODEL_VGA_COLOR));
+vga_set_monitor_sense(vga, monitor_sense(mon));   /* when it is plugged in */
+vga_signal_t sig;
+vga_render_rgb(vga, rgb);                    /* 640*400*3 */
+vga_signal(vga, &sig);
+monitor_display(mon, &sig, rgb, dt, picture); /* 640*400*monitor_channels(mon) */
 ```
 
 ### Timing: why the CPU must run in short slices
@@ -73,8 +99,8 @@ Measured with a program that waits for 70 retraces (should take exactly 70 frame
 
 | Mode | Description |
 |---|---|
-| `03h` (and `02h`) | text 80x25, 16 colors as grays, 8x16 CP437 font, B800:0000 |
-| `13h` | 320x200, 256 colors as grays, linear framebuffer at A000:0000 |
+| `03h` (and `02h`) | text 80x25, 16 colors, 8x16 CP437 font, B800:0000 |
+| `13h` | 320x200, 256 colors, linear framebuffer at A000:0000 |
 
 Any other mode set returns "not supported" and leaves the mode unchanged.
 
@@ -118,7 +144,7 @@ Other ports in 3B0h–3DFh (sequencer, graphics controller, attribute controller
 | `10h` | palette: AL = 00h, 01h, 02h, 03h, 07h, 08h, 09h, 10h, 12h, 15h, 17h, 1Bh (gray summing) |
 | `12h` | BL=10h: EGA/VGA information |
 | `13h` | write string (AL = 0–3) |
-| `1Ah` | AL=00h: display combination, reports **07h = VGA with analog monochrome display** |
+| `1Ah` | AL=00h: display combination: **07h** (VGA, monochrome monitor) or **08h** (VGA, color monitor or none), from the monitor sense |
 
 In mode 13h, BIOS text uses the 8x8 font (40x25 cells) in color BL. The BIOS data area at 0040:0000 is kept up to date (mode, columns, cursor position and shape, rows, character height), as programs read it directly.
 
@@ -155,7 +181,7 @@ make demo VM86_DIR=../vm86               # runs the demos, writes build/*.pgm sc
 
 With CMake: `cmake -S . -B build [-DVM86_DIR=../vm86]`, then `cmake --build build`.
 
-For an engine, compile `src/vga.c` and `src/font_cp437.c`. Both also compile as C++.
+For an engine, compile `src/vga.c`, `src/monitor.c` and `src/font_cp437.c`. All also compile as C++.
 
 ## Unreal (summary)
 
@@ -167,13 +193,16 @@ For an engine, compile `src/vga.c` and `src/font_cp437.c`. Both also compile as 
 ## Files
 
 ```
-include/vga.h            API
-src/vga.c                device
+include/vga.h            card API
+include/monitor.h        monitor API
+src/vga.c                card
+src/monitor.c            monitors
 src/font_cp437.c/.h      generated fonts (8x16, 8x8)
 tools/gen_font.py        font generator
 examples/vm86_glue.c     wiring with vm86 + "vgarun" screenshot tool
 examples/text_demo.asm   text mode demo (CP437, attributes, blink, cursor)
 examples/gfx_demo.asm    mode 13h demo (DAC ports, retrace-synced palette animation)
 tests/vga_test.c         unit tests
+tests/monitor_test.c     monitor tests
 tests/integration_test.c tests with vm86
 ```

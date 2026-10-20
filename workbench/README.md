@@ -9,7 +9,9 @@ What it shows:
 - **Program**: NASM-syntax source assembled with `asm86` and loaded as a .COM program. A program at `org 7C00h` is a boot sector: Run writes it to the diskette and boots from it. Assembly errors, and errors the machine reports while running (an unsupported BIOS call, port or instruction), point at their source line.
 - **Diskette**: one diskette, in drive A: or out of it: a new formatted 1.44 MB one, or a raw `.img` image opened from the computer. Copy the program onto it as a file, make it the boot sector, boot from A:, write-protect it, and save the image back. The page lists the diskette's files as the machine changes them. The diskette is not kept when the page is closed: save the image.
 
-A tiny DOS is provided, as in `pcrun`: `INT 20h` and `INT 21h AH=02h, 09h, 4Ch`.
+- **DOS86 system diskette**: a new diskette with [DOS86](https://github.com/cucsijuan/sw86/tree/main/dos) (the sw86 DOS: a subset of MS-DOS 3.30) and some of the examples as `.COM` files, all assembled in the page, and the machine boots from it to the `A:\>` prompt. Programs copied onto it run by typing their name.
+
+A tiny DOS is provided for programs started with Run, as in `pcrun`: `INT 20h` and `INT 21h AH=02h, 09h, 4Ch`.
 
 ## Building
 
@@ -17,7 +19,7 @@ A tiny DOS is provided, as in `pcrun`: `INT 20h` and `INT 21h AH=02h, 09h, 4Ch`.
 make WASI_SDK=/path/to/wasi-sdk     # build/workbench.wasm, then index.html
 ```
 
-[wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) is the only requirement (plus Python 3 to embed the result into the page). `shell.html` is the page without the machine; `tools/embed.py` adds the WebAssembly binary and the example programs to make `index.html`, which is committed so the page works straight from a checkout.
+[wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) is the only requirement (plus Python 3 to embed the result into the page). With a checkout of sw86 next to this repository (or `SW86=/path/to/sw86`), the DOS86 sources go into the page too; without it the DOS86 button is not shown. `shell.html` is the page without the machine; `tools/embed.py` adds the WebAssembly binary and the example programs to make `index.html`, which is committed so the page works straight from a checkout.
 
 ## Files
 

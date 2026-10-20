@@ -398,6 +398,7 @@ button[aria-pressed="false"] { background: var(--case-edge); }
       </header>
       <div class="keys">
         <button id="diskNew" type="button">New diskette</button>
+        <button id="diskDos" type="button" hidden>DOS86 system diskette</button>
         <button id="diskOpen" type="button">Open image…</button>
         <input type="file" id="diskFile" accept=".img,.ima,.dsk" hidden>
         <button id="diskSave" type="button">Save image</button>
@@ -423,6 +424,9 @@ const EXAMPLES = @EXAMPLES@;
 // SHA-256 of earlier versions of the examples: an unedited copy of one of
 // them left in the browser is replaced by the current version.
 const OLD_EXAMPLES = new Set(@OLD@);
+// DOS86 (from sw86): the sources of a system diskette, or null when the page
+// was built without them.
+const DOS86 = @DOS86@;
 
 // ---------- code page 437 ----------
 const CP437 = "\u0000☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼" +
@@ -457,7 +461,8 @@ const ui = {
   fdcCard: $("fdcCard"), fdcName: $("fdcName"), ledDrive: $("ledDrive"),
   diskState: $("diskState"), diskNew: $("diskNew"), diskOpen: $("diskOpen"), diskFile: $("diskFile"),
   diskSave: $("diskSave"), diskEject: $("diskEject"), diskWp: $("diskWp"), diskName: $("diskName"),
-  diskCopy: $("diskCopy"), diskBoot: $("diskBoot"), bootA: $("bootA"), diskFiles: $("diskFiles"), diskNote: $("diskNote")
+  diskCopy: $("diskCopy"), diskBoot: $("diskBoot"), bootA: $("bootA"), diskFiles: $("diskFiles"), diskNote: $("diskNote"),
+  diskDos: $("diskDos")
 };
 const ST = { RUNNING: 0, HALTED: 1, FINISHED: 2, ERROR: 3, IDLE: 4, OFF: 5 };
 const MON = { SHOWING: 0, OFF: 1, NO_SIGNAL: 2, OUT_OF_RANGE: 3, NONE: -1 };
@@ -647,6 +652,38 @@ ui.diskNew.addEventListener("click", () => {
   w.web_disk_new(0);
   diskNote("A new formatted 1.44 MB diskette is in drive A:.");
   syncDisk();
+});
+// A DOS86 system diskette, made in the page: the kernel, COMMAND.COM and some
+// of the examples assembled onto a new diskette, the boot sector installed,
+// then the machine boots from it.
+const DOS86_PROGRAMS = {
+  hello: "HELLO.COM", numbers: "NUMBERS.COM", factorial: "FACTOR.COM", sort: "SORT.COM", strings: "STRINGS.COM"
+};
+ui.diskDos.hidden = !DOS86;
+function assembleText(text) {
+  const { bytes } = encodeCP437(text);
+  if (bytes.length > w.web_src_cap()) return false;
+  new Uint8Array(w.memory.buffer).set(bytes, w.web_src());
+  return w.web_assemble(bytes.length) === 0;
+}
+function putFile(name, text) {
+  new Uint8Array(w.memory.buffer).set(new TextEncoder().encode(name + "\0"), w.web_scratch());
+  return assembleText(text) && w.web_disk_put_program() === 0;
+}
+ui.diskDos.addEventListener("click", () => {
+  if (w.web_disk_modified() && !confirm("The diskette has changes that were not saved. Replace it with a DOS86 system diskette?")) return;
+  w.web_disk_new(0);
+  const files = [["DOS86.SYS", DOS86.kernel], ["COMMAND.COM", DOS86.command]];
+  for (const [key, name] of Object.entries(DOS86_PROGRAMS)) files.push([name, EXAMPLES[key].source]);
+  let failed = "";
+  for (const [name, text] of files) if (!putFile(name, text)) { failed = name; break; }
+  if (!failed && !(assembleText(DOS86.boot) && w.web_disk_put_boot() === 0)) failed = "the boot sector";
+  syncDisk();
+  if (failed) { diskNote("The DOS86 diskette could not be made: " + failed + " did not assemble or did not fit."); return; }
+  diskNote("A DOS86 system diskette is in drive A: DOS86.SYS, COMMAND.COM and some of the examples. " +
+           "The machine boots from it; type DIR, or a program's name.");
+  bootFromA();
+  ui.screen.focus();
 });
 ui.diskOpen.addEventListener("click", () => ui.diskFile.click());
 ui.diskFile.addEventListener("change", async () => {

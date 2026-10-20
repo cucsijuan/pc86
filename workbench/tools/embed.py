@@ -2,7 +2,10 @@
 """Builds the single-file workbench page: shell.html with the WebAssembly
 machine and the example programs embedded.
 
-    embed.py shell.html workbench.wasm <suite root> index.html
+    embed.py shell.html workbench.wasm <suite root> index.html [--sw86 DIR]
+
+With --sw86, the sources of DOS86 (DIR/dos) go in too, and the page can make
+a DOS86 system diskette.
 """
 import base64
 import hashlib
@@ -49,8 +52,19 @@ def old_versions(root, path, current):
     return out
 
 
+# DOS86 (from sw86): the parts of a system diskette
+DOS86 = [("boot", "dos/boot.asm"), ("kernel", "dos/dos86.asm"), ("command", "dos/command.asm")]
+
+
 def main():
     shell, wasm, root, out = sys.argv[1:5]
+    sw86 = sys.argv[sys.argv.index("--sw86") + 1] if "--sw86" in sys.argv[5:] else None
+    dos86 = None
+    if sw86:
+        dos86 = {}
+        for key, path in DOS86:
+            with open(os.path.join(sw86, path), encoding="utf-8") as f:
+                dos86[key] = f.read().replace("\r\n", "\n")
     with open(shell, encoding="utf-8") as f:
         page = f.read()
     with open(wasm, "rb") as f:
@@ -64,10 +78,11 @@ def main():
         old |= old_versions(root, path, source)
     # "</" cannot appear inside a <script> element
     js = json.dumps(examples, ensure_ascii=False).replace("</", "<\\/")
-    for marker in ("@WASM@", "@EXAMPLES@", "@OLD@"):
+    for marker in ("@WASM@", "@EXAMPLES@", "@OLD@", "@DOS86@"):
         if page.count(marker) != 1:
             sys.exit("embed.py: %s must appear once in %s" % (marker, shell))
     page = page.replace("@WASM@", b64).replace("@EXAMPLES@", js)
+    page = page.replace("@DOS86@", json.dumps(dos86, ensure_ascii=False).replace("</", "<\\/"))
     page = page.replace("@OLD@", json.dumps(sorted(old)))
     with open(out, "w", encoding="utf-8") as f:
         f.write(page)

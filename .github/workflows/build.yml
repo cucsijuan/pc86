@@ -20,11 +20,20 @@ jobs:
         with:
           fetch-depth: 0          # earlier versions of the examples, see workbench/tools/embed.py
 
+      - name: Check out sw86 (DOS86)
+        uses: actions/checkout@v4
+        with:
+          repository: cucsijuan/sw86
+          path: sw86
+
       - name: Install nasm (the assembler is compared against it)
         run: sudo apt-get update && sudo apt-get install -y nasm
 
       - name: Test every component
         run: make test
+
+      - name: Test DOS86 on the machine
+        run: make -C sw86 test ASM86=../vm86/build/asm86 FDIMAGE=../fdc86/build/fdimage PCRUN=../pc86/build/pcrun
 
       - name: Install wasi-sdk
         run: |
@@ -36,7 +45,7 @@ jobs:
       - name: Build the workbench
         run: |
           rm -f workbench/index.html
-          make -C workbench WASI_SDK="$RUNNER_TEMP/wasi-sdk"
+          make -C workbench WASI_SDK="$RUNNER_TEMP/wasi-sdk" SW86=../sw86
           mkdir -p site
           cp workbench/index.html site/index.html
 

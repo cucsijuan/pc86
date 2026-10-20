@@ -6,6 +6,8 @@ depend on the others; `pc86` wires them into a machine. The long-term goal is to
 embed the whole machine in a game made with Godot (GDExtension), linking
 `libpc86`.
 
+**Try it in the browser: [cucsijuan.github.io/pc86](https://cucsijuan.github.io/pc86/)** — the whole machine, with an assembler editor and examples.
+
 | Component | What it is |
 |---|---|
 | [`vm86/`](vm86) | 8086 CPU core + NASM-compatible assembler (`asm86`), plus `run86` |

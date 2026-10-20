@@ -5,7 +5,7 @@
 #
 # WASI_SDK points at an extracted wasi-sdk release
 # (https://github.com/WebAssembly/wasi-sdk/releases).
-# SW86 is the sw86 checkout: with it, the page can make a DOS86 diskette.
+# SW86 is the sw86 checkout: with it, the page can make a COS diskette.
 
 WASI_SDK ?= /opt/wasi-sdk
 ROOT     := ..
@@ -27,15 +27,15 @@ SRC := src/web.c \
 
 HEADERS := $(wildcard $(ROOT)/*/include/*.h $(ROOT)/vga86/src/*.h $(ROOT)/fdc86/src/*.h)
 EXAMPLES := $(wildcard $(ROOT)/*/examples/*.asm examples/*.asm)
-DOS86    := $(wildcard $(SW86)/dos/boot.asm $(SW86)/dos/dos86.asm $(SW86)/dos/command.asm)
+COS    := $(wildcard $(SW86)/dos/boot.asm $(SW86)/dos/cos.asm $(SW86)/dos/command.asm)
 
 all: index.html
 
 $(BUILD)/workbench.wasm: $(SRC) $(HEADERS) | $(BUILD)
 	$(CC) $(CFLAGS) $(SRC) -lm -Wl,--strip-all -o $@
 
-index.html: shell.html tools/embed.py $(BUILD)/workbench.wasm $(EXAMPLES) $(DOS86)
-	python3 tools/embed.py shell.html $(BUILD)/workbench.wasm $(ROOT) $@ $(if $(DOS86),--sw86 $(SW86))
+index.html: shell.html tools/embed.py $(BUILD)/workbench.wasm $(EXAMPLES) $(COS)
+	python3 tools/embed.py shell.html $(BUILD)/workbench.wasm $(ROOT) $@ $(if $(COS),--sw86 $(SW86))
 
 $(BUILD):
 	mkdir -p $@

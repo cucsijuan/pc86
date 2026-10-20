@@ -398,7 +398,7 @@ button[aria-pressed="false"] { background: var(--case-edge); }
       </header>
       <div class="keys">
         <button id="diskNew" type="button">New diskette</button>
-        <button id="diskDos" type="button" hidden>DOS86 system diskette</button>
+        <button id="diskDos" type="button" hidden>COS system diskette</button>
         <button id="diskOpen" type="button">Open image…</button>
         <input type="file" id="diskFile" accept=".img,.ima,.dsk" hidden>
         <button id="diskSave" type="button">Save image</button>
@@ -424,9 +424,9 @@ const EXAMPLES = @EXAMPLES@;
 // SHA-256 of earlier versions of the examples: an unedited copy of one of
 // them left in the browser is replaced by the current version.
 const OLD_EXAMPLES = new Set(@OLD@);
-// DOS86 (from sw86): the sources of a system diskette, or null when the page
+// COS (from sw86): the sources of a system diskette, or null when the page
 // was built without them.
-const DOS86 = @DOS86@;
+const COS = @COS@;
 
 // ---------- code page 437 ----------
 const CP437 = "\u0000☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼" +
@@ -653,13 +653,13 @@ ui.diskNew.addEventListener("click", () => {
   diskNote("A new formatted 1.44 MB diskette is in drive A:.");
   syncDisk();
 });
-// A DOS86 system diskette, made in the page: the kernel, COMMAND.COM and some
+// A COS system diskette, made in the page: the kernel, COMMAND.COM and some
 // of the examples assembled onto a new diskette, the boot sector installed,
 // then the machine boots from it.
-const DOS86_PROGRAMS = {
+const COS_PROGRAMS = {
   hello: "HELLO.COM", numbers: "NUMBERS.COM", factorial: "FACTOR.COM", sort: "SORT.COM", strings: "STRINGS.COM"
 };
-ui.diskDos.hidden = !DOS86;
+ui.diskDos.hidden = !COS;
 function assembleText(text) {
   const { bytes } = encodeCP437(text);
   if (bytes.length > w.web_src_cap()) return false;
@@ -671,16 +671,16 @@ function putFile(name, text) {
   return assembleText(text) && w.web_disk_put_program() === 0;
 }
 ui.diskDos.addEventListener("click", () => {
-  if (w.web_disk_modified() && !confirm("The diskette has changes that were not saved. Replace it with a DOS86 system diskette?")) return;
+  if (w.web_disk_modified() && !confirm("The diskette has changes that were not saved. Replace it with a COS system diskette?")) return;
   w.web_disk_new(0);
-  const files = [["DOS86.SYS", DOS86.kernel], ["COMMAND.COM", DOS86.command]];
-  for (const [key, name] of Object.entries(DOS86_PROGRAMS)) files.push([name, EXAMPLES[key].source]);
+  const files = [["COS.SYS", COS.kernel], ["COMMAND.COM", COS.command]];
+  for (const [key, name] of Object.entries(COS_PROGRAMS)) files.push([name, EXAMPLES[key].source]);
   let failed = "";
   for (const [name, text] of files) if (!putFile(name, text)) { failed = name; break; }
-  if (!failed && !(assembleText(DOS86.boot) && w.web_disk_put_boot() === 0)) failed = "the boot sector";
+  if (!failed && !(assembleText(COS.boot) && w.web_disk_put_boot() === 0)) failed = "the boot sector";
   syncDisk();
-  if (failed) { diskNote("The DOS86 diskette could not be made: " + failed + " did not assemble or did not fit."); return; }
-  diskNote("A DOS86 system diskette is in drive A: DOS86.SYS, COMMAND.COM and some of the examples. " +
+  if (failed) { diskNote("The COS diskette could not be made: " + failed + " did not assemble or did not fit."); return; }
+  diskNote("A COS system diskette is in drive A: COS.SYS, COMMAND.COM and some of the examples. " +
            "The machine boots from it; type DIR, or a program's name.");
   bootFromA();
   ui.screen.focus();

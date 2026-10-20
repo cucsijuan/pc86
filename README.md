@@ -17,7 +17,7 @@ embed the whole machine in a game made with Godot (GDExtension), linking
 | [`vga86/`](vga86) | VGA card (text mode 03h, mode 13h, INT 10h) and monitors (mono, color, CGA, multisync) |
 | [`fdc86/`](fdc86) | uPD765A floppy controller + diskette BIOS (INT 13h), 3.5" drives, 1.44 MB / 720 KB diskettes, FAT12, `fdimage` |
 | [`pc86/`](pc86) | The motherboard: puts everything together, with ISA slots and hot-pluggable peripherals |
-| [`workbench/`](workbench) | The whole machine in a web page (WebAssembly): editor, examples, power, cards, peripherals and diskettes, and a DOS86 system diskette to boot |
+| [`workbench/`](workbench) | The whole machine in a web page (WebAssembly): editor, examples, power, cards, peripherals and diskettes, and a COS system diskette to boot |
 
 ## How a machine is put together
 
@@ -44,5 +44,5 @@ Each component can also be built on its own; see its README.
 
 The workbench needs [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases):
 `make -C workbench WASI_SDK=/path/to/wasi-sdk`. GitHub Actions runs `make test`, tests
-DOS86 from [sw86](https://github.com/cucsijuan/sw86) on the machine, and rebuilds the workbench
+COS from [sw86](https://github.com/cucsijuan/sw86) on the machine, and rebuilds the workbench
 with it on every push (`.github/workflows/build.yml`).

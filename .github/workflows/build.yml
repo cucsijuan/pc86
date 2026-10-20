@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0          # earlier versions of the examples, see workbench/tools/embed.py
 
-      - name: Check out sw86 (DOS86)
+      - name: Check out sw86 (COS)
         uses: actions/checkout@v4
         with:
           repository: cucsijuan/sw86
@@ -32,7 +32,7 @@ jobs:
       - name: Test every component
         run: make test
 
-      - name: Test DOS86 on the machine
+      - name: Test COS on the machine
         run: make -C sw86 test ASM86=../vm86/build/asm86 FDIMAGE=../fdc86/build/fdimage PCRUN=../pc86/build/pcrun
 
       - name: Install wasi-sdk

@@ -13,7 +13,7 @@ embed the whole machine in a game made with Godot (GDExtension), linking
 | [`kbd86/`](kbd86) | Keyboard (peripheral, several models), 8042 controller + keyboard BIOS, 8259 PIC |
 | [`vga86/`](vga86) | VGA card (text mode 03h, mode 13h, INT 10h) and monitors (mono, color, CGA, multisync) |
 | [`pc86/`](pc86) | The motherboard: puts everything together, with ISA slots and hot-pluggable peripherals |
-| [`workbench/`](workbench) | Browser workbench (`index.html`) to play with the machine |
+| [`workbench/`](workbench) | The whole machine in a web page (WebAssembly): editor, examples, power, cards and peripherals |
 
 ## How a machine is put together
 
@@ -37,3 +37,7 @@ make demo     # demos, screenshots in vga86/build and pc86/build
 `make -C vm86 test-cpu` validates the CPU against SingleStepTests (~700 MB download).
 
 Each component can also be built on its own; see its README.
+
+The workbench needs [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases):
+`make -C workbench WASI_SDK=/path/to/wasi-sdk`. GitHub Actions runs `make test` and
+rebuilds it on every push (`.github/workflows/build.yml`).

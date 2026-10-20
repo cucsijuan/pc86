@@ -1,0 +1,41 @@
+# workbench - the pc86 machine in a web page
+#
+# make              build/workbench.wasm and index.html (needs wasi-sdk)
+# make clean
+#
+# WASI_SDK points at an extracted wasi-sdk release
+# (https://github.com/WebAssembly/wasi-sdk/releases).
+
+WASI_SDK ?= /opt/wasi-sdk
+ROOT     := ..
+BUILD    := build
+CC       := $(WASI_SDK)/bin/clang
+CFLAGS   := --target=wasm32-wasip1 -mexec-model=reactor -O2 -std=c99 -Wall -Wextra -pedantic \
+            -I$(ROOT)/vm86/include -I$(ROOT)/pit86/include -I$(ROOT)/kbd86/include \
+            -I$(ROOT)/vga86/include -I$(ROOT)/pc86/include
+
+SRC := src/web.c \
+       $(ROOT)/pc86/src/pc.c $(ROOT)/pc86/src/pc_vga.c \
+       $(ROOT)/vm86/src/cpu.c $(ROOT)/vm86/src/asm.c \
+       $(ROOT)/pit86/src/pit.c \
+       $(ROOT)/kbd86/src/kbd.c $(ROOT)/kbd86/src/kbc.c $(ROOT)/kbd86/src/pic.c \
+       $(ROOT)/vga86/src/vga.c $(ROOT)/vga86/src/monitor.c $(ROOT)/vga86/src/font_cp437.c
+
+HEADERS := $(wildcard $(ROOT)/*/include/*.h $(ROOT)/vga86/src/*.h)
+EXAMPLES := $(wildcard $(ROOT)/*/examples/*.asm examples/*.asm)
+
+all: index.html
+
+$(BUILD)/workbench.wasm: $(SRC) $(HEADERS) | $(BUILD)
+	$(CC) $(CFLAGS) $(SRC) -lm -Wl,--strip-all -o $@
+
+index.html: shell.html tools/embed.py $(BUILD)/workbench.wasm $(EXAMPLES)
+	python3 tools/embed.py shell.html $(BUILD)/workbench.wasm $(ROOT) $@
+
+$(BUILD):
+	mkdir -p $@
+
+clean:
+	rm -rf $(BUILD)
+
+.PHONY: all clean

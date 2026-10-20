@@ -22,6 +22,7 @@ Puts the independent components together into a machine with expansion slots and
 | Machine tests (POST, boot message, BIOS timer, INT 1Ch and own INT 08h, BIOS services, monitor sense and hot-swap, keyboard hot-plug, port 61h, open bus, error reporting, save state, machine without video) | 35/35 |
 | Same tests under AddressSanitizer + UBSan | 0 errors |
 | `examples/clock.asm` with `pcrun` | screenshots checked |
+| `examples/piano.asm` in the [workbench](../workbench) | tone frequency checked |
 
 Compiles without warnings as C99 and as C++17.
 
@@ -117,5 +118,6 @@ src/pc.c              motherboard, BIOS, scheduling
 src/pc_vga.c          the VGA card
 tools/pcrun.c         runs a .COM on a full machine, saves screenshots
 examples/clock.asm    timer-driven stopwatch
+examples/piano.asm    notes on the PC speaker (timer channel 2, port 61h)
 tests/pc_test.c       machine tests
 ```

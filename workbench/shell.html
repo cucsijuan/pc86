@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>8086 workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --case: #C8C5BB;
+  --case-shade: #A9A598;
+  --case-edge: #8E8A7E;
+  --case-light: #DAD7CE;
+  --ink: #2E2D2A;
+  --ink-soft: #5A574F;
+  --key: #2E2D2A;
+  --key-ink: #ECEAE3;
+  --paper: #EFEDE7;
+  --paper-ink: #22211E;
+  --gutter-ink: #8C887C;
+  --amber: #E8A33D;
+  --red: #D2483C;
+  --led-off: #6F6B60;
+  --bezel: #3A3935;
+  --glass: #050806;
+  --focus: #1F5FBF;
+  --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --case: #3B3A36; --case-shade: #2F2E2B; --case-edge: #1F1E1C; --case-light: #4A4944;
+    --ink: #E4E1D8; --ink-soft: #ADA99E; --key: #191917; --key-ink: #E4E1D8;
+    --paper: #23221F; --paper-ink: #E6E3DA; --gutter-ink: #77736A;
+    --led-off: #55524B; --bezel: #1B1A18; --focus: #7FA8F0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --case: #3B3A36; --case-shade: #2F2E2B; --case-edge: #1F1E1C; --case-light: #4A4944;
+  --ink: #E4E1D8; --ink-soft: #ADA99E; --key: #191917; --key-ink: #E4E1D8;
+  --paper: #23221F; --paper-ink: #E6E3DA; --gutter-ink: #77736A;
+  --led-off: #55524B; --bezel: #1B1A18; --focus: #7FA8F0;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  margin: 0;
+  background: var(--case-shade);
+  color: var(--ink);
+  font: 15px/1.5 var(--sans);
+  min-height: 100%;
+}
+.bench {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 960px) { .bench { grid-template-columns: minmax(0, 1fr); padding: 12px; gap: 12px; } }
+
+/* ---------- monitor ---------- */
+.unit {
+  background: linear-gradient(180deg, var(--case-light), var(--case) 18%, var(--case) 82%, var(--case-shade));
+  border: 1px solid var(--case-edge);
+  border-radius: 14px;
+  padding: 22px 22px 14px;
+  box-shadow: 0 1px 0 var(--case-light) inset, 0 10px 24px rgba(0, 0, 0, .18);
+}
+.bezel {
+  background: var(--bezel);
+  border-radius: 22px;
+  padding: 26px;
+  box-shadow: 0 0 0 3px var(--case-edge), 0 2px 0 4px var(--case-light) inset;
+}
+@media (max-width: 560px) { .unit { padding: 10px 10px 8px; } .bezel { padding: 12px; border-radius: 14px; } }
+.screen {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--glass);
+  border-radius: 18px / 22px;
+  overflow: hidden;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, .9);
+}
+.screen:focus { outline: none; }
+.screen:focus-visible, .screen.typing { box-shadow: inset 0 0 40px rgba(0, 0, 0, .9), 0 0 0 3px var(--amber); }
+.screen { cursor: text; }
+.screen canvas {
+  position: absolute;
+  inset: 4% 3.5%;
+  width: 93%;
+  height: 92%;
+  image-rendering: pixelated;
+}
+#glow { filter: blur(5px) brightness(1.35); mix-blend-mode: screen; opacity: .55; }
+.screen::before {
+  /* scanlines */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(180deg, rgba(0,0,0,0) 0, rgba(0,0,0,0) 50%, rgba(0,0,0,.28) 50%, rgba(0,0,0,.28) 100%);
+  background-size: 100% calc(92% / 200);
+  background-position: 0 4%;
+  pointer-events: none;
+  z-index: 2;
+}
+.screen::after {
+  /* curvature shading and glass reflection */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 50% 45%, rgba(0,0,0,0) 62%, rgba(0,0,0,.55) 100%),
+    radial-gradient(60% 40% at 28% 18%, rgba(255,255,255,.06), rgba(255,255,255,0) 70%);
+  pointer-events: none;
+  z-index: 3;
+}
+.badge {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 14px;
+  padding: 0 4px;
+}
+.kbd-hint { margin: 6px 4px 0; font-size: 13px; color: var(--ink-soft); }
+.kbd-hint.typing { color: var(--ink); }
+.badge strong { font-weight: 600; font-size: 15px; letter-spacing: .01em; }
+.badge span { color: var(--ink-soft); font-size: 13px; }
+
+/* ---------- front panel ---------- */
+.panel {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  padding: 12px 4px 4px;
+  border-top: 1px solid var(--case-edge);
+}
+.keys { display: flex; flex-wrap: wrap; gap: 8px; }
+button, select {
+  font: 500 14px/1 var(--sans);
+  color: var(--key-ink);
+  background: var(--key);
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 16px;
+  box-shadow: 0 2px 0 var(--case-edge), 0 1px 0 rgba(255,255,255,.08) inset;
+  cursor: pointer;
+}
+button:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--case-edge); }
+button:disabled { opacity: .45; cursor: default; transform: none; }
+button:focus-visible, select:focus-visible, input:focus-visible, .code:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+select { padding-right: 28px; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--key-ink) 50%), linear-gradient(135deg, var(--key-ink) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+label.inline { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); }
+.leds { display: flex; gap: 14px; margin-left: auto; font-size: 13px; color: var(--ink-soft); }
+.led { display: inline-flex; align-items: center; gap: 6px; }
+.led i { width: 10px; height: 10px; border-radius: 50%; background: var(--led-off); box-shadow: inset 0 1px 1px rgba(0,0,0,.4); }
+.led.on.power i { background: #5CCB6B; box-shadow: 0 0 6px #5CCB6B; }
+.led.on.run i { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.led.on.err i { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.led.on.lock i { background: #5CCB6B; box-shadow: 0 0 6px #5CCB6B; }
+.keyboard-leds { flex-basis: 100%; justify-content: flex-end; margin-left: 0; }
+.status {
+  margin: 10px 4px 0;
+  font-size: 14px;
+  color: var(--ink);
+  min-height: 1.5em;
+}
+#meter { color: var(--ink-soft); font-size: 13px; margin-left: 10px; font-variant-numeric: tabular-nums; }
+.note { margin: 6px 4px 0; font-size: 13px; color: var(--ink-soft); max-width: 70ch; }
+
+/* ---------- editor ---------- */
+.desk {
+  background: var(--case);
+  border: 1px solid var(--case-edge);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 1px 0 var(--case-light) inset;
+}
+.desk header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.desk header .inline { min-width: 0; max-width: 100%; }
+#example { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.desk h1 { font-size: 20px; line-height: 1.2; margin: 0; font-weight: 600; }
+.code {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  background: var(--paper);
+  color: var(--paper-ink);
+  border-radius: 8px;
+  border: 1px solid var(--case-edge);
+  height: min(64vh, 640px);
+  overflow: hidden;
+}
+@media (max-width: 960px) { .code { height: 52vh; } }
+.gutter {
+  font: 13px/1.6 var(--mono);
+  color: var(--gutter-ink);
+  text-align: right;
+  padding: 10px 8px 10px 12px;
+  overflow: hidden;
+  user-select: none;
+  white-space: pre;
+  border-right: 1px solid var(--case-shade);
+}
+.gutter b { color: var(--red); font-weight: 500; }
+textarea {
+  font: 13px/1.6 var(--mono);
+  color: var(--paper-ink);
+  background: transparent;
+  border: 0;
+  resize: none;
+  padding: 10px 12px;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+  outline: none;
+}
+.errors { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow: auto; }
+.errors:empty { display: none; }
+.diag {
+  text-align: left;
+  font: 13px/1.45 var(--sans);
+  color: var(--paper-ink);
+  background: var(--paper);
+  border-left: 3px solid var(--red);
+  border-radius: 4px;
+  padding: 7px 10px;
+  box-shadow: none;
+  cursor: pointer;
+}
+.diag b { font-weight: 600; margin-right: 2px; }
+.hint { font-size: 13px; color: var(--ink-soft); margin: 0; }
+kbd { font: 12px var(--mono); padding: 1px 5px; border: 1px solid var(--case-edge); border-bottom-width: 2px; border-radius: 4px; background: var(--paper); color: var(--paper-ink); }
+/* ---------- monitor messages and connections ---------- */
+.osd {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  font: 500 15px/1.3 var(--mono);
+  color: #E8E6DF;
+  background: rgba(20, 30, 70, .85);
+  border: 1px solid rgba(200, 210, 255, .5);
+  padding: 8px 14px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.osd[hidden] { display: none; }
+.rear { margin-top: 14px; padding: 12px 4px 4px; border-top: 1px solid var(--case-edge); }
+.rear h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+.ports { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.port { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--case-shade); border-radius: 8px; padding: 10px; }
+.port-name { flex-basis: 100%; font-size: 13px; font-weight: 600; color: var(--ink); }
+.port-name small { font-weight: 400; color: var(--ink-soft); }
+.port-dev { font-size: 14px; flex: 1; }
+.port select { flex: 1; min-width: 0; }
+.port button { padding: 9px 12px; }
+button[aria-pressed="false"] { background: var(--case-edge); }
+@media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+</style>
+</head>
+<body>
+<main class="bench">
+  <section class="unit" aria-label="Monitor">
+    <div class="bezel">
+      <div class="screen" id="screen" tabindex="0" role="application" aria-label="Virtual monitor. Focus it to type into the machine; Control plus Escape returns to the page." aria-describedby="kbdHint">
+        <canvas id="glow" width="640" height="400" aria-hidden="true"></canvas>
+        <canvas id="crt" width="640" height="400" role="img" aria-label="Virtual monitor output"></canvas>
+        <div class="osd" id="osd" hidden></div>
+      </div>
+    </div>
+    <div class="badge"><strong id="monName">Monochrome VGA</strong><span id="monDesc"></span></div>
+    <p class="kbd-hint" id="kbdHint">Click the screen to type into the machine. <kbd>Ctrl</kbd>+<kbd>Esc</kbd> gives the keyboard back to the page.</p>
+    <div class="panel">
+      <div class="keys">
+        <button id="power" type="button" aria-pressed="true">Power</button>
+        <button id="reset" type="button">Reset</button>
+        <button id="run" type="button">Run</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </div>
+      <label class="inline">Speed
+        <select id="speed">
+          <option value="400000">8088 at 4.77 MHz</option>
+          <option value="700000">Turbo 8 MHz</option>
+          <option value="2000000">286 class</option>
+          <option value="10000000">Fast</option>
+        </select>
+      </label>
+      <label class="inline"><input type="checkbox" id="sound"> Speaker sound</label>
+      <div class="leds" aria-live="off">
+        <span class="led power" id="ledPower"><i></i>Power</span>
+        <span class="led run" id="ledRun"><i></i>Running</span>
+        <span class="led err" id="ledErr"><i></i>Error</span>
+      </div>
+      <div class="leds keyboard-leds" aria-label="Keyboard lights">
+        <span class="led lock" id="ledNum"><i></i>Num Lock</span>
+        <span class="led lock" id="ledCaps"><i></i>Caps Lock</span>
+        <span class="led lock" id="ledScroll"><i></i>Scroll Lock</span>
+      </div>
+    </div>
+    <p class="status"><span id="status" role="status">Starting…</span><small id="meter" aria-hidden="true"></small></p>
+    <div class="rear" aria-label="Connections">
+      <h2>Back of the machine</h2>
+      <div class="ports">
+        <div class="port">
+          <span class="port-name">Slot 1 (ISA)</span>
+          <span class="port-dev" id="cardName">VGA card</span>
+          <button id="card" type="button">Remove card</button>
+        </div>
+        <div class="port">
+          <label class="port-name" for="monitor">Monitor <small>on the VGA card</small></label>
+          <select id="monitor"></select>
+          <button id="monPower" type="button" aria-pressed="true">Monitor power</button>
+        </div>
+        <div class="port">
+          <label class="port-name" for="keyboard">Keyboard <small>on the board</small></label>
+          <select id="keyboard"></select>
+        </div>
+      </div>
+      <p class="note" id="connNote" aria-live="polite"></p>
+      <p class="note">Cards change only with the power off; the monitor and the keyboard can be plugged in and out while the machine runs. On the board: 8086 CPU, 640 KB, interrupt controller, timer, keyboard controller and speaker. There is no disk yet, so the program is loaded straight into memory. The machine sees a US keyboard; touch screens have no physical keys to send.</p>
+    </div>
+  </section>
+
+  <section class="desk" aria-label="Program">
+    <header>
+      <h1>Program</h1>
+      <label class="inline">Example
+        <select id="example"></select>
+      </label>
+    </header>
+    <div class="code">
+      <div class="gutter" id="gutter" aria-hidden="true">1</div>
+      <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Assembly source (NASM syntax)"></textarea>
+    </div>
+    <div class="errors" id="errors" aria-live="polite"></div>
+    <p class="hint">NASM syntax for the 8086, assembled as a .COM program at <code>org 100h</code>. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it. Text in strings is stored as code page 437.</p>
+  </section>
+</main>
+
+<script>
+const WASM_B64 = "@WASM@";
+const EXAMPLES = @EXAMPLES@;
+
+// ---------- code page 437 ----------
+const CP437 = "\u0000☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼" +
+  " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~⌂" +
+  "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u00A0";
+const TO_CP437 = new Map();
+for (let i = 0; i < 256; i++) TO_CP437.set(CP437[i], i);
+function encodeCP437(text) {
+  const out = new Uint8Array(text.length);
+  let n = 0, unknown = 0;
+  for (const ch of text) {
+    let b;
+    if (ch === "\n" || ch === "\r" || ch === "\t") b = ch.charCodeAt(0);
+    else if (TO_CP437.has(ch)) b = TO_CP437.get(ch);
+    else { b = 0x3F; unknown++; }
+    out[n++] = b;
+  }
+  return { bytes: out.subarray(0, n), unknown };
+}
+
+// ---------- machine ----------
+const $ = id => document.getElementById(id);
+const ui = {
+  run: $("run"), stop: $("stop"), speed: $("speed"), sound: $("sound"), status: $("status"),
+  power: $("power"), reset: $("reset"), card: $("card"), cardName: $("cardName"),
+  monitor: $("monitor"), monPower: $("monPower"), keyboard: $("keyboard"), connNote: $("connNote"),
+  monName: $("monName"), monDesc: $("monDesc"), osd: $("osd"),
+  src: $("src"), gutter: $("gutter"), errors: $("errors"), example: $("example"),
+  ledPower: $("ledPower"), ledRun: $("ledRun"), ledErr: $("ledErr"),
+  crt: $("crt"), glow: $("glow"), screen: $("screen"), kbdHint: $("kbdHint"),
+  ledNum: $("ledNum"), ledCaps: $("ledCaps"), ledScroll: $("ledScroll")
+};
+const ST = { RUNNING: 0, HALTED: 1, FINISHED: 2, ERROR: 3, IDLE: 4, OFF: 5 };
+const MON = { SHOWING: 0, OFF: 1, NO_SIGNAL: 2, OUT_OF_RANGE: 3, NONE: -1 };
+let w = null, errorLine = 0;
+
+function cstr(ptr) {
+  const m = new Uint8Array(w.memory.buffer);
+  let e = ptr;
+  while (m[e]) e++;
+  return new TextDecoder().decode(m.subarray(ptr, e));
+}
+
+async function boot() {
+  const bin = Uint8Array.from(atob(WASM_B64), c => c.charCodeAt(0));
+  const mod = await WebAssembly.compile(bin);
+  const imports = {};
+  for (const imp of WebAssembly.Module.imports(mod)) {
+    imports[imp.module] = imports[imp.module] || {};
+    imports[imp.module][imp.name] = () => 0;
+  }
+  const inst = await WebAssembly.instantiate(mod, imports);
+  w = inst.exports;
+  w._initialize();
+  w.web_init();
+  buildConnections();
+}
+
+// ---------- screen ----------
+const ctx = ui.crt.getContext("2d");
+const gctx = ui.glow.getContext("2d");
+const image = ctx.createImageData(640, 400);
+const image32 = new Uint32Array(image.data.buffer);
+const MONO = new Uint32Array(256);
+(function buildPhosphor() {
+  // Monochrome monitor: luminance -> P1-style green phosphor, RGBA stored
+  // little endian as ABGR. Black is the dark glass of the tube.
+  for (let i = 0; i < 256; i++) {
+    const l = i / 255;
+    const r = Math.round(6 + 86 * l * l);
+    const g = Math.round(12 + 243 * l);
+    const b = Math.round(10 + 128 * l * l);
+    MONO[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+  }
+})();
+const GLASS = MONO[0];
+let shown = MON.SHOWING;
+function draw(dt) {
+  // The monitor keeps its own phosphor glow, also while it fades out.
+  const st = w.web_display(dt);
+  if (st === MON.NONE) image32.fill(GLASS);
+  else if (w.web_monitor_color()) {
+    const px = new Uint8Array(w.memory.buffer, w.web_pixels(), 640 * 400 * 3);
+    for (let i = 0, j = 0; i < image32.length; i++, j += 3)
+      image32[i] = (255 << 24) | (px[j + 2] << 16) | (px[j + 1] << 8) | px[j];
+  } else {
+    const px = new Uint8Array(w.memory.buffer, w.web_pixels(), 640 * 400);
+    for (let i = 0; i < px.length; i++) image32[i] = MONO[px[i]];
+  }
+  ctx.putImageData(image, 0, 0);
+  gctx.clearRect(0, 0, 640, 400);
+  gctx.drawImage(ui.crt, 0, 0);
+  if (st !== shown) {
+    shown = st;
+    // what the monitor's own electronics print on the glass
+    const text = st === MON.NO_SIGNAL ? "No signal" : st === MON.OUT_OF_RANGE ? "Out of range" : "";
+    ui.osd.textContent = text;
+    ui.osd.hidden = !text;
+    ui.crt.setAttribute("aria-label", st === MON.NONE ? "No monitor connected" : st === MON.OFF ? "Monitor switched off" : text || "Virtual monitor output");
+  }
+}
+
+// ---------- connections ----------
+const MONITOR_DESC = [
+  "long-persistence green phosphor, 31.5 kHz",
+  "analog color, 31.5 kHz",
+  "digital DE-9 plug, 15.7 kHz",
+  "analog color, 15 to 38 kHz"
+];
+function cname(ptr) { return cstr(ptr); }
+function buildConnections() {
+  for (let i = 0; i < w.web_monitor_count(); i++) ui.monitor.add(new Option(cname(w.web_monitor_name(i)), i));
+  ui.monitor.add(new Option("Unplugged", -1));
+  for (let i = 0; i < w.web_keyboard_count(); i++) ui.keyboard.add(new Option(cname(w.web_keyboard_name(i)), i));
+  ui.keyboard.add(new Option("Unplugged", -1));
+  const saved = loadConnections();
+  if (saved.keyboard !== undefined) w.web_set_keyboard(saved.keyboard);
+  if (saved.monitor !== undefined) w.web_set_monitor(saved.monitor);
+  syncConnections();
+}
+function syncConnections() {
+  const on = !!w.web_powered(), mon = w.web_monitor(), card = !!w.web_card_in();
+  ui.monitor.value = String(mon);
+  ui.keyboard.value = String(w.web_keyboard());
+  ui.power.setAttribute("aria-pressed", String(on));
+  ui.power.textContent = on ? "Power off" : "Power on";
+  ui.reset.disabled = !on;
+  ui.ledPower.classList.toggle("on", on);
+  ui.card.textContent = card ? "Remove card" : "Insert card";
+  ui.card.disabled = on;
+  ui.card.title = on ? "Switch the power off to change cards" : "";
+  ui.cardName.textContent = card ? "VGA card" : "Empty";
+  ui.monPower.disabled = mon < 0;
+  ui.monPower.setAttribute("aria-pressed", String(!!w.web_monitor_powered()));
+  ui.monName.textContent = mon < 0 ? "No monitor" : cname(w.web_monitor_name(mon));
+  ui.monDesc.textContent = mon < 0 ? "the VGA card's connector is empty" : MONITOR_DESC[mon] || "";
+  try { localStorage.setItem("w86.connections", JSON.stringify({ monitor: mon, keyboard: w.web_keyboard() })); } catch (_) {}
+}
+function loadConnections() {
+  try { return JSON.parse(localStorage.getItem("w86.connections")) || {}; } catch (_) { return {}; }
+}
+function note(text) { ui.connNote.textContent = text; }
+ui.monitor.addEventListener("change", () => {
+  const id = Number(ui.monitor.value);
+  if (w.web_set_monitor(id) !== 0) note("The " + cname(w.web_monitor_name(id)) + " monitor has a 9-pin digital plug: it does not fit the VGA card's 15-pin connector.");
+  else note(id >= 0 && w.web_powered() ? "Programs read the monitor type when they set a video mode (INT 10h AX=1A00h)." : "");
+  syncConnections();
+});
+ui.keyboard.addEventListener("change", () => {
+  w.web_set_keyboard(Number(ui.keyboard.value));
+  note(Number(ui.keyboard.value) < 0 ? "Keyboard unplugged: keys typed now go nowhere." : "");
+  syncConnections();
+});
+ui.monPower.addEventListener("click", () => { w.web_monitor_power(w.web_monitor_powered() ? 0 : 1); syncConnections(); });
+ui.card.addEventListener("click", () => { w.web_card(w.web_card_in() ? 0 : 1); note(""); syncConnections(); });
+ui.power.addEventListener("click", () => {
+  w.web_power(w.web_powered() ? 0 : 1);
+  state = w.web_state();
+  assemblyFailed = false;
+  setLeds();
+  setStatus(cstr(w.web_message()));
+  syncConnections();
+});
+ui.reset.addEventListener("click", run);
+
+// ---------- speaker ----------
+// The PC speaker is a square wave from timer channel 2. Browsers only start
+// audio after a user gesture, so it is switched on with the checkbox.
+let audio = null, osc = null, gain = null;
+ui.sound.addEventListener("change", () => {
+  if (ui.sound.checked && !audio) {
+    try {
+      audio = new AudioContext();
+      osc = audio.createOscillator();
+      gain = audio.createGain();
+      osc.type = "square";
+      gain.gain.value = 0;
+      osc.connect(gain).connect(audio.destination);
+      osc.start();
+    } catch (_) { ui.sound.checked = false; audio = null; }
+  }
+  if (audio) (ui.sound.checked ? audio.resume() : audio.suspend()).catch(() => {});
+});
+function speaker() {
+  if (!audio || !ui.sound.checked) return;
+  const hz = w.web_speaker_hz();
+  const audible = hz >= 20 && hz <= 20000;
+  if (audible) osc.frequency.setTargetAtTime(hz, audio.currentTime, 0.001);
+  gain.gain.setTargetAtTime(audible ? 0.06 : 0, audio.currentTime, 0.004);
+}
+
+// ---------- editor ----------
+function lineCount(text) { let n = 1; for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++; return n; }
+let marked = new Set();
+function updateGutter() {
+  const n = lineCount(ui.src.value);
+  let s = "";
+  for (let i = 1; i <= n; i++) s += (marked.has(i) ? "<b>" + i + "</b>" : i) + "\n";
+  ui.gutter.innerHTML = s;
+  ui.gutter.scrollTop = ui.src.scrollTop;
+}
+function goToLine(line) {
+  const lines = ui.src.value.split("\n");
+  let start = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i++) start += lines[i].length + 1;
+  const end = start + (lines[line - 1] || "").length;
+  ui.src.focus();
+  ui.src.setSelectionRange(start, end);
+  const lh = parseFloat(getComputedStyle(ui.src).lineHeight) || 20;
+  ui.src.scrollTop = Math.max(0, (line - 4) * lh);
+  updateGutter();
+}
+function showErrors(list) {
+  ui.errors.textContent = "";
+  marked = new Set(list.map(e => e.line).filter(Boolean));
+  for (const e of list) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "diag";
+    if (e.line) {
+      const t = document.createElement("b");
+      t.textContent = "Line " + e.line;
+      b.appendChild(t);
+      b.appendChild(document.createTextNode(" "));
+      b.addEventListener("click", () => goToLine(e.line));
+    }
+    b.appendChild(document.createTextNode(e.message));
+    ui.errors.appendChild(b);
+  }
+  updateGutter();
+}
+ui.src.addEventListener("input", () => { if (marked.size) { marked.clear(); } updateGutter(); save(); });
+ui.src.addEventListener("scroll", () => { ui.gutter.scrollTop = ui.src.scrollTop; });
+ui.src.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
+});
+
+function save() {
+  try { localStorage.setItem("w86.source", ui.src.value); localStorage.setItem("w86.example", ui.example.value); } catch (_) {}
+}
+function load() {
+  try { return { src: localStorage.getItem("w86.source"), ex: localStorage.getItem("w86.example") }; } catch (_) { return {}; }
+}
+
+for (const [key, ex] of Object.entries(EXAMPLES)) {
+  const o = document.createElement("option");
+  o.value = key;
+  o.textContent = ex.title;
+  ui.example.appendChild(o);
+}
+ui.example.addEventListener("change", () => {
+  ui.src.value = EXAMPLES[ui.example.value].source;
+  ui.src.scrollTop = 0;
+  showErrors([]);
+  save();
+  run();
+  if (EXAMPLES[ui.example.value].keys) ui.screen.focus();
+});
+
+// ---------- keyboard ----------
+// Keys go to the machine while the screen has focus. Physical key positions
+// (KeyboardEvent.code) are sent, so the machine sees a US keyboard.
+function sendKey(code, down) {
+  if (!w) return false;
+  const b = new TextEncoder().encode(code + "\0");
+  if (b.length > 63) return false;
+  new Uint8Array(w.memory.buffer).set(b, w.web_scratch());
+  return w.web_key(down ? 1 : 0) === 1;
+}
+ui.screen.addEventListener("keydown", e => {
+  if (e.key === "Escape" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ui.screen.blur(); return; }
+  if (e.repeat) { e.preventDefault(); return; }       // the keyboard repeats by itself
+  if (sendKey(e.code, true)) e.preventDefault();
+});
+ui.screen.addEventListener("keyup", e => { if (sendKey(e.code, false)) e.preventDefault(); });
+ui.screen.addEventListener("focus", () => {
+  ui.screen.classList.add("typing");
+  ui.kbdHint.classList.add("typing");
+  ui.kbdHint.innerHTML = "Typing into the machine. <kbd>Ctrl</kbd>+<kbd>Esc</kbd> gives the keyboard back to the page.";
+});
+ui.screen.addEventListener("blur", () => {
+  if (w) w.web_release_keys();                         // no stuck keys
+  ui.screen.classList.remove("typing");
+  ui.kbdHint.classList.remove("typing");
+  ui.kbdHint.innerHTML = "Click the screen to type into the machine. <kbd>Ctrl</kbd>+<kbd>Esc</kbd> gives the keyboard back to the page.";
+});
+window.addEventListener("blur", () => { if (w) w.web_release_keys(); });
+
+// ---------- run loop ----------
+let state = ST.IDLE, last = 0, meterTick = 0, assemblyFailed = false;
+function setLeds() {
+  ui.ledRun.classList.toggle("on", state === ST.RUNNING);
+  ui.ledErr.classList.toggle("on", state === ST.ERROR);
+  ui.stop.disabled = !(state === ST.RUNNING || state === ST.HALTED);
+  ui.run.disabled = false;
+}
+// The status line is announced to screen readers, so it only changes when the
+// state changes; the frame counter next to it is visual only.
+function setStatus(text, extra) {
+  if (ui.status.textContent !== text) ui.status.textContent = text;
+  setMeter(extra || "");
+}
+function setMeter(text) { if ($("meter").textContent !== text) $("meter").textContent = text; }
+function run() {
+  if (!w) return;
+  const { bytes, unknown } = encodeCP437(ui.src.value);
+  if (bytes.length > w.web_src_cap()) { showErrors([{ line: 0, message: "The source is too large." }]); return; }
+  new Uint8Array(w.memory.buffer).set(bytes, w.web_src());
+  const n = w.web_assemble(bytes.length);
+  if (n) {
+    const list = [];
+    for (let i = 0; i < n; i++) list.push({ line: w.web_err_line(i), message: cstr(w.web_err_msg(i)) });
+    showErrors(list);
+    w.web_stop();
+    state = ST.ERROR;
+    assemblyFailed = true;
+    setLeds();
+    setStatus(n === 1 ? "The program has 1 error." : "The program has " + n + " errors.", "Select an error to go to its line.");
+    return;
+  }
+  showErrors(unknown ? [{ line: 0, message: unknown + " character(s) have no code page 437 equivalent and were stored as “?”." }] : []);
+  w.web_start();
+  syncConnections();
+  assemblyFailed = false;
+  state = ST.RUNNING;
+  errorLine = 0;
+  setLeds();
+  setStatus("Running", w.web_code_size() + " bytes");
+}
+function stop() { if (w) { w.web_stop(); } }
+ui.run.addEventListener("click", run);
+ui.stop.addEventListener("click", stop);
+
+function tick(now) {
+  const dt = Math.min(0.05, last ? (now - last) / 1000 : 1 / 60);
+  last = now;
+  if (w) {
+    const before = state;
+    // Also while idle in the BIOS, so the keyboard lights and the timer work;
+    // a stopped or switched off machine does not advance.
+    const now_state = w.web_frame(dt, Number(ui.speed.value));
+    if (!assemblyFailed) state = now_state;
+    draw(dt);
+    speaker();
+    const leds = w.web_leds();
+    ui.ledScroll.classList.toggle("on", !!(leds & 1));
+    ui.ledNum.classList.toggle("on", !!(leds & 2));
+    ui.ledCaps.classList.toggle("on", !!(leds & 4));
+    const mode = (w.web_mode() === 0x13 ? "mode 13h" : "text mode") + ", " + w.web_seconds().toFixed(1) + " s";
+    if (state !== before) {
+      const msg = cstr(w.web_message());
+      if (state === ST.ERROR) {
+        const line = w.web_error_line();
+        if (line && line !== errorLine) {
+          errorLine = line;
+          showErrors([{ line, message: msg }]);
+        }
+        setStatus(msg, line ? "line " + line : "");
+      } else {
+        setStatus(msg, state === ST.OFF ? "" : mode);
+      }
+      setLeds();
+    } else if ((state === ST.RUNNING || state === ST.HALTED) && ++meterTick % 10 === 0) {
+      setMeter(mode);
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+(async function main() {
+  const saved = load();
+  if (saved.ex && EXAMPLES[saved.ex]) ui.example.value = saved.ex;
+  else ui.example.value = "text_demo";
+  ui.src.value = saved.src || EXAMPLES[ui.example.value].source;
+  updateGutter();
+  try {
+    await boot();
+    run();
+  } catch (e) {
+    setStatus("The machine could not start: " + e.message);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

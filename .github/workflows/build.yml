@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WASI_SDK_VERSION: "34"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test every component
+        run: make test
+
+      - name: Install wasi-sdk
+        run: |
+          curl -sSL -o wasi-sdk.tar.gz \
+            "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz"
+          mkdir -p "$RUNNER_TEMP/wasi-sdk"
+          tar xzf wasi-sdk.tar.gz -C "$RUNNER_TEMP/wasi-sdk" --strip-components=1
+
+      - name: Build the workbench
+        run: |
+          rm -f workbench/index.html
+          make -C workbench WASI_SDK="$RUNNER_TEMP/wasi-sdk"
+          mkdir -p site
+          cp workbench/index.html site/index.html
+
+      - name: Keep the page as a download
+        uses: actions/upload-artifact@v4
+        with:
+          name: workbench
+          path: site/index.html
+
+      - name: Prepare the page for GitHub Pages
+        if: github.event_name != 'pull_request' && !github.event.repository.private
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # GitHub Pages needs a public repository (or a paid plan for private ones)
+  # and Settings > Pages > Source set to "GitHub Actions".
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && !github.event.repository.private
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

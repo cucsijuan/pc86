@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Builds the single-file workbench page: shell.html with the WebAssembly
+machine and the example programs embedded.
+
+    embed.py shell.html workbench.wasm <suite root> index.html
+"""
+import base64
+import json
+import os
+import sys
+
+# key, file (relative to the suite root), title, whether it reads the keyboard
+EXAMPLES = [
+    ("text_demo", "vga86/examples/text_demo.asm", "Text mode demo", False),
+    ("typewriter", "kbd86/examples/typewriter.asm", "Typewriter (keyboard through the BIOS)", True),
+    ("keys_game", "kbd86/examples/keys_game.asm", "Move a square (own keyboard handler)", True),
+    ("clock", "pc86/examples/clock.asm", "Stopwatch (timer interrupt)", True),
+    ("piano", "pc86/examples/piano.asm", "Piano (timer and speaker)", True),
+    ("bounce", "workbench/examples/bounce.asm", "Bouncing ball (mode 13h)", False),
+    ("gfx_demo", "vga86/examples/gfx_demo.asm", "Palette animation (mode 13h)", False),
+    ("hello", "vm86/examples/hello.asm", "Hello", False),
+    ("numbers", "vm86/examples/numbers.asm", "Numbers 1 to 20", False),
+    ("factorial", "vm86/examples/factorial.asm", "Recursive factorial", False),
+    ("sort", "vm86/examples/sort.asm", "Bubble sort", False),
+    ("strings", "vm86/examples/strings.asm", "String instructions", False),
+    ("interrupts", "vm86/examples/interrupts.asm", "Interrupt handlers", False),
+]
+
+
+def main():
+    shell, wasm, root, out = sys.argv[1:5]
+    with open(shell, encoding="utf-8") as f:
+        page = f.read()
+    with open(wasm, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    examples = {}
+    for key, path, title, keys in EXAMPLES:
+        with open(os.path.join(root, path), encoding="utf-8") as f:
+            examples[key] = {"title": title, "source": f.read(), "keys": keys}
+    # "</" cannot appear inside a <script> element
+    js = json.dumps(examples, ensure_ascii=False).replace("</", "<\\/")
+    for marker in ("@WASM@", "@EXAMPLES@"):
+        if page.count(marker) != 1:
+            sys.exit("embed.py: %s must appear once in %s" % (marker, shell))
+    page = page.replace("@WASM@", b64).replace("@EXAMPLES@", js)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(page)
+
+
+if __name__ == "__main__":
+    main()

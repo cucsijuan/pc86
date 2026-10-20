@@ -3,6 +3,7 @@
 # make              build all libraries and tools
 # make test         unit + integration + machine tests of every component
 # make demo         demos (screenshots in vga86/build and pc86/build)
+# make workbench   the web page (needs wasi-sdk, see workbench/README.md)
 # make clean
 
 COMPONENTS := vm86 pit86 kbd86 vga86 pc86
@@ -22,7 +23,10 @@ demo:
 	$(MAKE) -C vga86 demo VM86_DIR=$(VM86_DIR)
 	$(MAKE) -C pc86 demo
 
+workbench:
+	$(MAKE) -C workbench
+
 clean:
 	@for c in $(COMPONENTS); do $(MAKE) -C $$c clean; done
 
-.PHONY: all test demo clean
+.PHONY: all test demo workbench clean

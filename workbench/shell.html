@@ -358,6 +358,9 @@ button[aria-pressed="false"] { background: var(--case-edge); }
 <script>
 const WASM_B64 = "@WASM@";
 const EXAMPLES = @EXAMPLES@;
+// SHA-256 of earlier versions of the examples: an unedited copy of one of
+// them left in the browser is replaced by the current version.
+const OLD_EXAMPLES = new Set(@OLD@);
 
 // ---------- code page 437 ----------
 const CP437 = "\u0000☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼" +
@@ -595,8 +598,20 @@ ui.src.addEventListener("keydown", e => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
 });
 
+// The editor's text is kept only when it is not the example as shipped, so
+// updated examples reach the page.
 function save() {
-  try { localStorage.setItem("w86.source", ui.src.value); localStorage.setItem("w86.example", ui.example.value); } catch (_) {}
+  try {
+    if (ui.src.value === EXAMPLES[ui.example.value].source) localStorage.removeItem("w86.source");
+    else localStorage.setItem("w86.source", ui.src.value);
+    localStorage.setItem("w86.example", ui.example.value);
+  } catch (_) {}
+}
+async function isOldExample(text) {
+  try {
+    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return OLD_EXAMPLES.has([...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join(""));
+  } catch (_) { return false; }
 }
 function load() {
   try { return { src: localStorage.getItem("w86.source"), ex: localStorage.getItem("w86.example") }; } catch (_) { return {}; }
@@ -736,7 +751,9 @@ function tick(now) {
   const saved = load();
   if (saved.ex && EXAMPLES[saved.ex]) ui.example.value = saved.ex;
   else ui.example.value = "text_demo";
-  ui.src.value = saved.src || EXAMPLES[ui.example.value].source;
+  const keep = saved.src && !(await isOldExample(saved.src));
+  ui.src.value = keep ? saved.src : EXAMPLES[ui.example.value].source;
+  if (!keep) save();
   updateGutter();
   try {
     await boot();

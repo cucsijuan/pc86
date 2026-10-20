@@ -5,8 +5,10 @@ machine and the example programs embedded.
     embed.py shell.html workbench.wasm <suite root> index.html
 """
 import base64
+import hashlib
 import json
 import os
+import subprocess
 import sys
 
 # key, file (relative to the suite root), title, whether it reads the keyboard,
@@ -29,6 +31,23 @@ EXAMPLES = [
 ]
 
 
+def old_versions(root, path, current):
+    """SHA-256 of every committed version of an example but the current one."""
+    try:
+        log = subprocess.run(["git", "-C", root, "log", "--format=%H", "--", path],
+                             capture_output=True, text=True, check=True).stdout.split()
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    out = set()
+    for commit in log:
+        r = subprocess.run(["git", "-C", root, "show", "%s:%s" % (commit, path)], capture_output=True)
+        if r.returncode == 0:
+            text = r.stdout.decode("utf-8").replace("\r\n", "\n")
+            if text != current:
+                out.add(hashlib.sha256(text.encode("utf-8")).hexdigest())
+    return out
+
+
 def main():
     shell, wasm, root, out = sys.argv[1:5]
     with open(shell, encoding="utf-8") as f:
@@ -36,15 +55,19 @@ def main():
     with open(wasm, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("ascii")
     examples = {}
+    old = set()
     for key, path, title, keys, sound in EXAMPLES:
         with open(os.path.join(root, path), encoding="utf-8") as f:
-            examples[key] = {"title": title, "source": f.read(), "keys": keys, "sound": sound}
+            source = f.read()
+        examples[key] = {"title": title, "source": source, "keys": keys, "sound": sound}
+        old |= old_versions(root, path, source)
     # "</" cannot appear inside a <script> element
     js = json.dumps(examples, ensure_ascii=False).replace("</", "<\\/")
-    for marker in ("@WASM@", "@EXAMPLES@"):
+    for marker in ("@WASM@", "@EXAMPLES@", "@OLD@"):
         if page.count(marker) != 1:
             sys.exit("embed.py: %s must appear once in %s" % (marker, shell))
     page = page.replace("@WASM@", b64).replace("@EXAMPLES@", js)
+    page = page.replace("@OLD@", json.dumps(sorted(old)))
     with open(out, "w", encoding="utf-8") as f:
         f.write(page)
 

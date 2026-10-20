@@ -61,12 +61,24 @@ double tone = pc_speaker_hz(pc);                  /* 0 = silent */
 kbd_key(kbd, kbd_key_from_code("KeyA"), pressed);
 ```
 
-`tools/pcrun.c` is a complete example that also saves screenshots:
+`tools/pcrun.c` is a complete example that also saves screenshots, boots diskette images and can type on the keyboard, which makes it a test driver for software on diskettes:
 
 ```
 make demo                       # assembles examples/clock.asm and runs it for 3 s
 build/pcrun program.com [--seconds S] [--every N] [--out prefix] [--ips N] [--color]
+build/pcrun --a system.img --b data.img --type "dir b:\n" --until "A:\>" --text
 ```
+
+| Option | |
+|---|---|
+| `program.com` | loaded after the POST, as DOS would; without it the machine boots from drive A: |
+| `--a` / `--b image` | the diskette adapter in slot 1 with two drives, and these images (1.44 MB or 720 KB) in them |
+| `--a2` / `--b2 image` | a second diskette, put in the drive instead of the first one when `--type` reaches `\1` (A:) or `\2` (B:) |
+| `--protect a\|b` | the write-protect tab of that diskette |
+| `--save` | writes the images back if the machine changed them |
+| `--type TEXT` | types TEXT, a key each time the BIOS keyboard buffer is empty: `\n` Enter, `\b` Backspace, `\e` Escape, `\t` Tab, `\c` Ctrl+C, `\\` a backslash |
+| `--until TEXT` | stops when everything has been typed and TEXT is on the cursor's row (exit code 3 if that never happens) |
+| `--text` | prints the text screen at the end |
 
 ### Time
 
@@ -109,7 +121,7 @@ A port a device decodes but does not emulate stops the machine with `PC_ERROR` a
 
 ### DOS
 
-There is none: a program loaded with `pc_load_com()` that calls `INT 20h` or `INT 21h` reaches whatever the host provides through `pc_set_int_hook()`, which is called for software interrupts whose vector has no handler. `pcrun` provides a tiny one (`INT 20h`, `INT 21h AH=02h, 09h, 4Ch`).
+There is none: a program loaded with `pc_load_com()` that calls `INT 20h` or `INT 21h` reaches whatever the host provides through `pc_set_int_hook()`, which is called for software interrupts whose vector has no handler. `pcrun` provides a tiny one (`INT 20h`, `INT 21h AH=02h, 09h, 4Ch`). A DOS booted from a diskette installs its own vectors, and from then on the hook is no longer called for them.
 
 ### Writing a card
 
@@ -134,7 +146,7 @@ include/pc_fdc.h      the diskette adapter
 src/pc.c              motherboard, BIOS, scheduling
 src/pc_vga.c          the VGA card
 src/pc_fdc.c          the diskette adapter
-tools/pcrun.c         runs a .COM on a full machine, saves screenshots
+tools/pcrun.c         runs a .COM or boots diskettes on a full machine, types, saves screenshots
 examples/clock.asm    timer-driven stopwatch
 examples/piano.asm    notes on the PC speaker (timer channel 2, port 61h)
 examples/music.asm    a tune from a note table, sequenced by the timer interrupt

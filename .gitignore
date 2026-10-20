@@ -1,0 +1,11 @@
+build/
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.com
+*.pgm
+__pycache__/
+_originals/
+*.zip

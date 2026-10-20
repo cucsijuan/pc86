@@ -16,14 +16,19 @@ set(VM86_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vm86 CACHE PATH "vm86 package")
 set(PIT86_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../pit86 CACHE PATH "pit86 package")
 set(KBD86_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../kbd86 CACHE PATH "kbd86 package")
 set(VGA86_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vga86 CACHE PATH "vga86 package")
+set(DMA86_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../dma86 CACHE PATH "dma86 package")
+set(FDC86_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../fdc86 CACHE PATH "fdc86 package")
 
 set(PC86_SOURCES
-  src/pc.c src/pc_vga.c
+  src/pc.c src/pc_vga.c src/pc_fdc.c
   ${VM86_DIR}/src/cpu.c ${VM86_DIR}/src/asm.c
   ${PIT86_DIR}/src/pit.c
+  ${DMA86_DIR}/src/dma.c
   ${KBD86_DIR}/src/kbd.c ${KBD86_DIR}/src/kbc.c ${KBD86_DIR}/src/pic.c
-  ${VGA86_DIR}/src/vga.c ${VGA86_DIR}/src/monitor.c ${VGA86_DIR}/src/font_cp437.c)
-set(PC86_INCLUDES include ${VM86_DIR}/include ${PIT86_DIR}/include ${KBD86_DIR}/include ${VGA86_DIR}/include)
+  ${VGA86_DIR}/src/vga.c ${VGA86_DIR}/src/monitor.c ${VGA86_DIR}/src/font_cp437.c
+  ${FDC86_DIR}/src/fdc.c ${FDC86_DIR}/src/fdc_bios.c ${FDC86_DIR}/src/fdd.c ${FDC86_DIR}/src/fat12.c)
+set(PC86_INCLUDES include ${VM86_DIR}/include ${PIT86_DIR}/include ${DMA86_DIR}/include ${KBD86_DIR}/include
+  ${VGA86_DIR}/include ${FDC86_DIR}/include)
 
 # The whole machine in one library (static, and shared for GDExtension and friends)
 add_library(pc86 STATIC ${PC86_SOURCES})
@@ -31,7 +36,7 @@ target_include_directories(pc86 PUBLIC ${PC86_INCLUDES})
 
 add_library(pc86_shared SHARED ${PC86_SOURCES})
 target_include_directories(pc86_shared PUBLIC ${PC86_INCLUDES})
-target_compile_definitions(pc86_shared PRIVATE PC86_BUILD_DLL VM86_BUILD_DLL PIT86_BUILD_DLL KBD86_BUILD_DLL VGA86_BUILD_DLL)
+target_compile_definitions(pc86_shared PRIVATE PC86_BUILD_DLL VM86_BUILD_DLL PIT86_BUILD_DLL KBD86_BUILD_DLL VGA86_BUILD_DLL DMA86_BUILD_DLL FDC86_BUILD_DLL)
 set_target_properties(pc86_shared PROPERTIES OUTPUT_NAME pc86)
 
 if(NOT MSVC)

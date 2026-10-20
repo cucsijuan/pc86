@@ -6,7 +6,7 @@
 # make workbench   the web page (needs wasi-sdk, see workbench/README.md)
 # make clean
 
-COMPONENTS := vm86 pit86 kbd86 vga86 pc86
+COMPONENTS := vm86 pit86 dma86 kbd86 vga86 fdc86 pc86
 VM86_DIR   := $(CURDIR)/vm86
 
 all:
@@ -15,8 +15,10 @@ all:
 test: all
 	$(MAKE) -C vm86 test
 	$(MAKE) -C pit86 test
+	$(MAKE) -C dma86 test
 	$(MAKE) -C kbd86 test test-integration VM86_DIR=$(VM86_DIR)
 	$(MAKE) -C vga86 test test-integration VM86_DIR=$(VM86_DIR)
+	$(MAKE) -C fdc86 test
 	$(MAKE) -C pc86 test
 
 demo:

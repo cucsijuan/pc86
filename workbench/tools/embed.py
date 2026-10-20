@@ -22,6 +22,7 @@ EXAMPLES = [
     ("music", "pc86/examples/music.asm", "Music: Greensleeves (speaker)", True, True),
     ("bounce", "workbench/examples/bounce.asm", "Bouncing ball (mode 13h)", False, False),
     ("gfx_demo", "vga86/examples/gfx_demo.asm", "Palette animation (mode 13h)", False, False),
+    ("boot", "fdc86/examples/boot.asm", "Boot sector: list the diskette's files", False, False),
     ("hello", "vm86/examples/hello.asm", "Hello", False, False),
     ("numbers", "vm86/examples/numbers.asm", "Numbers 1 to 20", False, False),
     ("factorial", "vm86/examples/factorial.asm", "Recursive factorial", False, False),

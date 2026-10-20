@@ -3,7 +3,9 @@
  * keyboard) running small programs.
  */
 #include "asm86.h"
+#include "fat12.h"
 #include "pc.h"
+#include "pc_fdc.h"
 #include "pc_vga.h"
 
 #include <stdio.h>
@@ -88,6 +90,131 @@ static int text_at(int col, int row, const char *s)
     const uint8_t *m = pc_memory(pc) + 0xB8000 + (row * 80 + col) * 2;
     for (; *s; s++, m += 2) if (*m != (uint8_t)*s) return 0;
     return 1;
+}
+
+/* How many times s is on the text screen. */
+static int on_screen(const char *s)
+{
+    int row, col, n = 0;
+    for (row = 0; row < 25; row++)
+        for (col = 0; col + (int)strlen(s) <= 80; col++)
+            n += text_at(col, row, s);
+    return n;
+}
+
+/* A boot sector that reads with the BIOS and then drives the floppy
+ * controller and the DMA controller itself, the way a disk driver does. */
+static const char *BOOT_SECTOR =
+    "org 7C00h\n"
+    "    jmp short start\n"
+    "    nop\n"
+    "    times 59 db 0\n"                       /* the BPB stays here */
+    "start:\n"
+    "    xor ax, ax\n"
+    "    mov ds, ax\n"
+    "    mov es, ax\n"
+    "    mov [drive], dl\n"
+    "    mov ax, 0201h\n"                       /* BIOS: cylinder 0, sector 2 to 0000:8000 */
+    "    mov bx, 8000h\n"
+    "    mov cx, 0002h\n"
+    "    xor dh, dh\n"
+    "    int 13h\n"
+    "    mov [bios_status], ah\n"
+    "    mov al, 06h\n"                         /* DMA channel 2: mask, */
+    "    out 0Ah, al\n"
+    "    mov al, 46h\n"                         /* single transfer, write to memory, */
+    "    out 0Bh, al\n"
+    "    out 0Ch, al\n"
+    "    xor al, al\n"                          /* address 0000:9000, */
+    "    out 04h, al\n"
+    "    mov al, 90h\n"
+    "    out 04h, al\n"
+    "    xor al, al\n"
+    "    out 81h, al\n"
+    "    mov al, 0FFh\n"                        /* 512 bytes, */
+    "    out 05h, al\n"
+    "    mov al, 01h\n"
+    "    out 05h, al\n"
+    "    mov al, 02h\n"                         /* unmask */
+    "    out 0Ah, al\n"
+    "    mov dx, 3F2h\n"                        /* motor A, DMA and IRQ on */
+    "    mov al, 1Ch\n"
+    "    out dx, al\n"
+    "    and byte [43Eh], 7Fh\n"
+    "    mov al, 0Fh\n"                         /* SEEK drive 0 to cylinder 1 */
+    "    call send\n"
+    "    xor al, al\n"
+    "    call send\n"
+    "    mov al, 1\n"
+    "    call send\n"
+    "    call wait_irq\n"
+    "    mov al, 08h\n"                         /* SENSE INTERRUPT STATUS */
+    "    call send\n"
+    "    call recv\n"
+    "    mov [seek_st0], al\n"
+    "    call recv\n"
+    "    mov [seek_pcn], al\n"
+    "    mov si, read_cmd\n"                    /* READ DATA cylinder 1, head 0, sector 3 */
+    "    mov cx, 9\n"
+    "next_byte:\n"
+    "    lodsb\n"
+    "    call send\n"
+    "    loop next_byte\n"
+    "    call wait_irq\n"
+    "    mov di, result\n"
+    "    mov cx, 7\n"
+    "next_result:\n"
+    "    call recv\n"
+    "    stosb\n"
+    "    loop next_result\n"
+    "    mov byte [done], 1\n"
+    "halt:\n"
+    "    hlt\n"
+    "    jmp halt\n"
+    "send:\n"
+    "    push ax\n"
+    "    mov dx, 3F4h\n"
+    "send_wait:\n"
+    "    in al, dx\n"
+    "    and al, 0C0h\n"
+    "    cmp al, 80h\n"
+    "    jne send_wait\n"
+    "    pop ax\n"
+    "    mov dx, 3F5h\n"
+    "    out dx, al\n"
+    "    ret\n"
+    "recv:\n"
+    "    mov dx, 3F4h\n"
+    "recv_wait:\n"
+    "    in al, dx\n"
+    "    and al, 0C0h\n"
+    "    cmp al, 0C0h\n"
+    "    jne recv_wait\n"
+    "    mov dx, 3F5h\n"
+    "    in al, dx\n"
+    "    ret\n"
+    "wait_irq:\n"                               /* the BIOS's INT 0Eh sets bit 7 of 0040:003E */
+    "    sti\n"
+    "    hlt\n"
+    "    test byte [43Eh], 80h\n"
+    "    jz wait_irq\n"
+    "    and byte [43Eh], 7Fh\n"
+    "    ret\n"
+    "read_cmd db 0E6h, 0, 1, 0, 3, 2, 18, 1Bh, 0FFh\n"
+    "drive db 0FFh\n"
+    "bios_status db 0FFh\n"
+    "seek_st0 db 0\n"
+    "seek_pcn db 0\n"
+    "done db 0\n"
+    "result times 7 db 0\n";
+
+static uint32_t boot_sym(const asm86_result_t *a, const char *name)
+{
+    int i;
+    for (i = 0; i < a->symbol_count; i++)
+        if (!strcmp(a->symbols[i].name, name)) return (uint32_t)a->symbols[i].value;
+    printf("no symbol %s\n", name);
+    exit(1);
 }
 
 int main(void)
@@ -343,6 +470,142 @@ int main(void)
         CHECK(var("count") >= saved + 18, "it keeps running from there");
     }
     free(state);
+
+    /* ---------- diskettes ---------- */
+    {
+        pc_fdc_card_t *fdc = pc_fdc_card_create();
+        fdd_t *drive = fdd_create(fdd_builtin_model(FDD_MODEL_35_HD));
+        disk_t *disk = disk_create(DISK_1440K);
+        uint8_t *m = pc_memory(pc), *img;
+        asm86_result_t a;
+
+        pc_power_off(pc);
+        CHECK(pc_insert_card(pc, 1, pc_fdc_card_slot(fdc)) == 0, "diskette adapter in slot 1");
+        pc_fdc_card_connect_drive(fdc, 0, drive);
+        boot();
+        CHECK(pc_status(pc) == PC_HALTED && on_screen("No boot device available."), "empty drive: no boot device");
+        CHECK((m[0x410] & 0xC1) == 0x01, "the equipment word lists one diskette drive");
+
+        fdd_insert(drive, disk);
+        boot();
+        CHECK(on_screen("The diskette in drive A: is not bootable."), "an unformatted diskette has no boot signature");
+
+        fat12_format(disk, "PC86");
+        boot();
+        CHECK(on_screen("Non-system disk") == 1 && on_screen("Press any key to restart") == 1,
+              "a formatted diskette boots and its boot sector says it is not a system diskette");
+        type(0x39);
+        run_frames(3);
+        CHECK(on_screen("Non-system disk") == 2, "a key: the boot sector calls INT 19h and boots again");
+
+        if (asm86_assemble(BOOT_SECTOR, &a) != 0 || a.error_count) {
+            printf("boot sector: line %d: %s\n", a.errors[0].line, a.errors[0].message);
+            exit(1);
+        }
+        CHECK(fat12_install_boot(disk, a.code, a.size) == 0, "boot sector installed on the diskette");
+        img = disk_data(disk);
+        {
+            int i;
+            for (i = 0; i < 512; i++) img[(1 * 36 + 2) * 512 + i] = (uint8_t)(i ^ 0x5A);   /* cylinder 1, sector 3 */
+        }
+        boot();
+        run_frames(60);
+        CHECK(m[boot_sym(&a, "done")] == 1, "the boot sector ran to the end");
+        CHECK(m[boot_sym(&a, "drive")] == 0 && m[boot_sym(&a, "bios_status")] == 0 && !memcmp(m + 0x8000, img + 512, 512),
+              "booted with DL = 0; INT 13h read sector 2");
+        CHECK(m[boot_sym(&a, "seek_st0")] == 0x20 && m[boot_sym(&a, "seek_pcn")] == 1,
+              "SEEK on the controller, IRQ 6 through the BIOS's INT 0Eh, SENSE INTERRUPT STATUS");
+        CHECK(m[boot_sym(&a, "result")] == 0 && m[boot_sym(&a, "result") + 5] == 4,
+              "READ DATA ends normally at the DMA terminal count");
+        CHECK(!memcmp(m + 0x9000, img + (1 * 36 + 2) * 512, 512), "and the 8237 put the sector at 0000:9000");
+        CHECK(fdd_motor(drive) && (m[0x43F] & 1), "the motor is on");
+        run_frames(150);
+        CHECK(!fdd_motor(drive) && !(m[0x43F] & 1), "two seconds later the BIOS timer interrupt turns it off");
+        asm86_free(&a);
+
+        /* hot-swapping the diskette */
+        fdd_eject(drive);
+        load("org 100h\n"
+             "    mov ah, 16h\n"
+             "    xor dl, dl\n"
+             "    int 13h\n"
+             "    mov [changed], ah\n"
+             "    mov ax, 0201h\n"
+             "    mov bx, buf\n"
+             "    mov cx, 0001h\n"
+             "    xor dx, dx\n"
+             "    int 13h\n"
+             "    mov [empty], ah\n"
+             "    int 20h\n"
+             "changed db 0, 0\n"
+             "empty db 0, 0\n"
+             "buf times 512 db 0\n");
+        run_frames(2);
+        CHECK((var("changed") & 0xFF) == 0x06 && (var("empty") & 0xFF) == 0x80,
+              "diskette out: INT 13h AH=16h says changed, a read times out");
+        fdd_insert(drive, disk);
+        disk_clear_modified(disk);
+        load("org 100h\n"
+             "    mov ax, 0201h\n"
+             "    mov bx, buf\n"
+             "    mov cx, 0001h\n"
+             "    xor dx, dx\n"
+             "    int 13h\n"
+             "    mov [first], ah\n"
+             "    mov ax, 0201h\n"
+             "    mov cx, 0001h\n"
+             "    int 13h\n"
+             "    mov [second], ah\n"
+             "    mov word [buf], 1234h\n"
+             "    mov ax, 0301h\n"
+             "    mov cx, 0201h\n"                  /* cylinder 2, sector 1 */
+             "    mov dh, 1\n"
+             "    int 13h\n"
+             "    mov [third], ah\n"
+             "    int 20h\n"
+             "first db 0, 0\n"
+             "second db 0, 0\n"
+             "third db 0, 0\n"
+             "buf times 512 db 0\n");
+        run_frames(2);
+        CHECK((var("first") & 0xFF) == 0x06 && (var("second") & 0xFF) == 0x00, "back in: media changed once, then it reads");
+        CHECK((var("third") & 0xFF) == 0x00 && img[(2 * 36 + 18) * 512] == 0x34 && img[(2 * 36 + 18) * 512 + 1] == 0x12 &&
+              disk_modified(disk), "INT 13h writes to the diskette");
+
+        /* state with the adapter in a slot */
+        len = pc_state_size(pc);
+        state = (uint8_t *)malloc(len);
+        CHECK(pc_save_state(pc, state, len) == len && pc_load_state(pc, state, len) == 0, "state with the diskette adapter");
+        free(state);
+
+        /* a DMA mode the 8237 emulation does not have */
+        load("org 100h\n"
+             "    mov al, 0C6h\n"                   /* cascade mode on channel 2 */
+             "    out 0Bh, al\n"
+             "    mov al, 02h\n"
+             "    out 0Ah, al\n"
+             "    mov dx, 3F5h\n"
+             "    mov si, cmd\n"
+             "    mov cx, 9\n"
+             "next:\n"
+             "    lodsb\n"
+             "    out dx, al\n"
+             "    loop next\n"
+             "idle:\n"
+             "    hlt\n"
+             "    jmp idle\n"
+             "cmd db 0E6h, 4, 2, 1, 1, 2, 18, 1Bh, 0FFh\n");   /* where the BIOS left the head */
+        run_frames(60);
+        CHECK(pc_status(pc) == PC_ERROR && strstr(pc_error(pc), "DMA") != NULL, "an unsupported DMA mode is reported");
+        printf("     (%s)\n", pc_error(pc));
+
+        pc_power_off(pc);
+        CHECK(pc_remove_card(pc, 1) == pc_fdc_card_slot(fdc) && !fdd_motor(drive), "adapter removed; the drive stops");
+        fdd_eject(drive);
+        pc_fdc_card_destroy(fdc);
+        fdd_destroy(drive);
+        disk_destroy(disk);
+    }
 
     /* ---------- a machine without a video card ---------- */
     pc_power_off(pc);

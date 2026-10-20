@@ -12,16 +12,18 @@ BUILD    := build
 CC       := $(WASI_SDK)/bin/clang
 CFLAGS   := --target=wasm32-wasip1 -mexec-model=reactor -O2 -std=c99 -Wall -Wextra -pedantic \
             -I$(ROOT)/vm86/include -I$(ROOT)/pit86/include -I$(ROOT)/kbd86/include \
-            -I$(ROOT)/vga86/include -I$(ROOT)/pc86/include
+            -I$(ROOT)/vga86/include -I$(ROOT)/pc86/include -I$(ROOT)/dma86/include -I$(ROOT)/fdc86/include
 
 SRC := src/web.c \
-       $(ROOT)/pc86/src/pc.c $(ROOT)/pc86/src/pc_vga.c \
+       $(ROOT)/pc86/src/pc.c $(ROOT)/pc86/src/pc_vga.c $(ROOT)/pc86/src/pc_fdc.c \
        $(ROOT)/vm86/src/cpu.c $(ROOT)/vm86/src/asm.c \
        $(ROOT)/pit86/src/pit.c \
+       $(ROOT)/dma86/src/dma.c \
        $(ROOT)/kbd86/src/kbd.c $(ROOT)/kbd86/src/kbc.c $(ROOT)/kbd86/src/pic.c \
-       $(ROOT)/vga86/src/vga.c $(ROOT)/vga86/src/monitor.c $(ROOT)/vga86/src/font_cp437.c
+       $(ROOT)/vga86/src/vga.c $(ROOT)/vga86/src/monitor.c $(ROOT)/vga86/src/font_cp437.c \
+       $(ROOT)/fdc86/src/fdc.c $(ROOT)/fdc86/src/fdc_bios.c $(ROOT)/fdc86/src/fdd.c $(ROOT)/fdc86/src/fat12.c
 
-HEADERS := $(wildcard $(ROOT)/*/include/*.h $(ROOT)/vga86/src/*.h)
+HEADERS := $(wildcard $(ROOT)/*/include/*.h $(ROOT)/vga86/src/*.h $(ROOT)/fdc86/src/*.h)
 EXAMPLES := $(wildcard $(ROOT)/*/examples/*.asm examples/*.asm)
 
 all: index.html

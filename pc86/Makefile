@@ -1,4 +1,4 @@
-# pc86 - the motherboard: puts vm86, pit86, kbd86 and vga86 together
+# pc86 - the motherboard: puts vm86, pit86, dma86, kbd86, vga86 and fdc86 together
 #
 # make          build/libpc86.a and build/libpc86.so: the whole machine in one library
 # make test     machine tests
@@ -12,20 +12,26 @@ VM86_DIR ?= ../vm86
 PIT86_DIR ?= ../pit86
 KBD86_DIR ?= ../kbd86
 VGA86_DIR ?= ../vga86
-CFLAGS  += -Iinclude -I$(VM86_DIR)/include -I$(PIT86_DIR)/include -I$(KBD86_DIR)/include -I$(VGA86_DIR)/include
+DMA86_DIR ?= ../dma86
+FDC86_DIR ?= ../fdc86
+CFLAGS  += -Iinclude -I$(VM86_DIR)/include -I$(PIT86_DIR)/include -I$(KBD86_DIR)/include -I$(VGA86_DIR)/include \
+           -I$(DMA86_DIR)/include -I$(FDC86_DIR)/include
 LDLIBS  := -lm
 BUILD   := build
 
-SRC := src/pc.c src/pc_vga.c \
+SRC := src/pc.c src/pc_vga.c src/pc_fdc.c \
        $(VM86_DIR)/src/cpu.c $(VM86_DIR)/src/asm.c \
        $(PIT86_DIR)/src/pit.c \
+       $(DMA86_DIR)/src/dma.c \
        $(KBD86_DIR)/src/kbd.c $(KBD86_DIR)/src/kbc.c $(KBD86_DIR)/src/pic.c \
-       $(VGA86_DIR)/src/vga.c $(VGA86_DIR)/src/monitor.c $(VGA86_DIR)/src/font_cp437.c
+       $(VGA86_DIR)/src/vga.c $(VGA86_DIR)/src/monitor.c $(VGA86_DIR)/src/font_cp437.c \
+       $(FDC86_DIR)/src/fdc.c $(FDC86_DIR)/src/fdc_bios.c $(FDC86_DIR)/src/fdd.c $(FDC86_DIR)/src/fat12.c
 OBJ := $(patsubst %.c,$(BUILD)/obj/%.o,$(notdir $(SRC)))
-HDR := $(wildcard include/*.h $(VM86_DIR)/include/*.h $(PIT86_DIR)/include/*.h \
-                  $(KBD86_DIR)/include/*.h $(VGA86_DIR)/include/*.h $(VGA86_DIR)/src/*.h)
+HDR := $(wildcard include/*.h $(VM86_DIR)/include/*.h $(PIT86_DIR)/include/*.h $(DMA86_DIR)/include/*.h \
+                  $(KBD86_DIR)/include/*.h $(VGA86_DIR)/include/*.h $(VGA86_DIR)/src/*.h \
+                  $(FDC86_DIR)/include/*.h $(FDC86_DIR)/src/*.h)
 
-vpath %.c src $(VM86_DIR)/src $(PIT86_DIR)/src $(KBD86_DIR)/src $(VGA86_DIR)/src
+vpath %.c src $(VM86_DIR)/src $(PIT86_DIR)/src $(DMA86_DIR)/src $(KBD86_DIR)/src $(VGA86_DIR)/src $(FDC86_DIR)/src
 
 ifeq ($(OS),Windows_NT)
   SHARED := $(BUILD)/pc86.dll

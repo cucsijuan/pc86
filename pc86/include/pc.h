@@ -4,8 +4,10 @@
  * Puts the independent components together into a machine:
  *
  *   on the board (fixed)   8086 CPU (vm86), 640 KB of RAM, 8259 PIC, 8253 PIT,
- *                          8042 keyboard controller, port 61h, system BIOS ROM
- *   expansion slots (ISA)  cards (pc_card_t): video, and later sound, disk...
+ *                          8237 DMA controller, 8042 keyboard controller,
+ *                          port 61h, system BIOS ROM
+ *   expansion slots (ISA)  cards (pc_card_t): video (pc_vga.h), diskette
+ *                          adapter (pc_fdc.h), and later sound, serial...
  *                          Cards are inserted and removed with the power off.
  *   connectors             keyboard (kbd86), on the board; the monitor plugs
  *                          into the video card (pc_vga.h). Peripherals can be
@@ -18,10 +20,14 @@
  * rate of the engine.
  *
  * BIOS: the ROM at F000:0000 holds real 8086 code where a program can observe
- * it (the timer interrupt, the reset entry, the unexpected-IRQ handler) and
- * entry points serviced in C for the rest (INT 09h, 11h, 12h, 16h, 19h, 1Ah).
- * A program that installs its own handler changes the vector and gets the real
- * behavior. Cards provide their own ROM services (the VGA card: INT 10h).
+ * it (the timer interrupt, the bootstrap, the diskette interrupt, the reset
+ * entry, the unexpected-IRQ handler) and entry points serviced in C for the
+ * rest (INT 09h, 11h, 12h, 16h, 1Ah). A program that installs its own handler
+ * changes the vector and gets the real behavior. Cards provide their own ROM
+ * services (the VGA card: INT 10h; the diskette adapter: INT 13h).
+ *
+ * Boot: INT 19h reads the boot sector of drive A: to 0000:7C00 through INT
+ * 13h and jumps to it with DL = 0 if it ends in 55AAh.
  *
  * Ports nobody decodes read as FFh and ignore writes, like an empty bus.
  * Ports a device decodes but does not emulate stop the machine with an error
@@ -80,10 +86,21 @@ enum {
     PC_BIOS_WAIT        = 2          /* re-execute the INT instruction and let time pass */
 };
 
+/* What the board's DMA controller did with a card's request. */
+enum {
+    PC_DMA_DONE   = 0,               /* every byte moved */
+    PC_DMA_TC     = 1,               /* terminal count reached: the card ends its transfer */
+    PC_DMA_NO_ACK = 2                /* channel masked (or not emulated: the machine stops) */
+};
+
 /*
  * An ISA card. Every callback may be NULL. The card's option ROM services
  * the interrupts listed in rom_ints: the POST points those vectors at the
  * card's ROM, and bios() is called while they still do.
+ *
+ * dma and bus are filled in by the machine when the card is inserted: a
+ * card asserting DREQ on a channel calls dma(bus, channel, ...) and the
+ * board's 8237 moves the bytes, in the direction the program set up.
  */
 typedef struct pc_card {
     const char *name;
@@ -100,6 +117,8 @@ typedef struct pc_card {
     size_t (*state_size)(void *user);
     size_t (*save_state)(void *user, void *buf, size_t len);
     int    (*load_state)(void *user, const void *buf, size_t len);
+    int  (*dma)(void *bus, int channel, uint8_t *buf, size_t len, size_t *moved);   /* PC_DMA_*, set by the machine */
+    void *bus;
 } pc_card_t;
 
 /* ---------- machine ---------- */
@@ -121,8 +140,8 @@ PC86_API pc_card_t *pc_card(pc_t *pc, int slot);
 PC86_API void   pc_connect_keyboard(pc_t *pc, kbd_t *keyboard);
 PC86_API kbd_t *pc_keyboard(pc_t *pc);
 
-/* Power switch. Power on clears memory, runs the POST and boots; with no boot
- * device the BIOS says so and waits. */
+/* Power switch. Power on clears memory, runs the POST and boots from drive
+ * A:; with no bootable diskette the BIOS says so and waits. */
 PC86_API void        pc_power_on(pc_t *pc);
 PC86_API void        pc_power_off(pc_t *pc);
 PC86_API void        pc_reset(pc_t *pc);                     /* reset button: power cycle */

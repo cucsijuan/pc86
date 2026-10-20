@@ -12,20 +12,22 @@ embed the whole machine in a game made with Godot (GDExtension), linking
 |---|---|
 | [`vm86/`](vm86) | 8086 CPU core + NASM-compatible assembler (`asm86`), plus `run86` |
 | [`pit86/`](pit86) | 8253/8254 programmable interval timer (system tick, speaker) |
+| [`dma86/`](dma86) | 8237A DMA controller and page registers |
 | [`kbd86/`](kbd86) | Keyboard (peripheral, several models), 8042 controller + keyboard BIOS, 8259 PIC |
 | [`vga86/`](vga86) | VGA card (text mode 03h, mode 13h, INT 10h) and monitors (mono, color, CGA, multisync) |
+| [`fdc86/`](fdc86) | uPD765A floppy controller + diskette BIOS (INT 13h), 3.5" drives, 1.44 MB / 720 KB diskettes, FAT12, `fdimage` |
 | [`pc86/`](pc86) | The motherboard: puts everything together, with ISA slots and hot-pluggable peripherals |
-| [`workbench/`](workbench) | The whole machine in a web page (WebAssembly): editor, examples, power, cards and peripherals |
+| [`workbench/`](workbench) | The whole machine in a web page (WebAssembly): editor, examples, power, cards, peripherals and diskettes |
 
 ## How a machine is put together
 
 Like a real PC:
 
-- **Motherboard** (fixed): CPU, RAM, PIC, PIT, keyboard controller, port 61h, BIOS ROM.
-- **Expansion slots**: cards, changed with the power off (a VGA card today).
-- **Peripherals**: keyboard and monitor, plugged and unplugged at any time; different models have different capabilities.
+- **Motherboard** (fixed): CPU, RAM, PIC, PIT, DMA controller, keyboard controller, port 61h, BIOS ROM.
+- **Expansion slots**: cards, changed with the power off (a VGA card and a diskette adapter today).
+- **Peripherals**: keyboard, monitor and floppy drives, plugged and unplugged at any time, and diskettes in and out of the drives; different models have different capabilities.
 
-Every device is its own project and does not depend on the others or on the CPU; `pc86` is the only one that knows them all. New devices (serial port and mouse, storage, sound...) go in their own top-level folder following the same layout: `include/`, `src/`, `tests/`, `examples/`, `Makefile`, `CMakeLists.txt`, `README.md`.
+Every device is its own project and does not depend on the others or on the CPU; `pc86` is the only one that knows them all. New devices (serial port and mouse, hard disk, sound...) go in their own top-level folder following the same layout: `include/`, `src/`, `tests/`, `examples/`, `Makefile`, `CMakeLists.txt`, `README.md`.
 
 ## Build and test everything
 

@@ -2,15 +2,18 @@
  * workbench - the browser side of a pc86 machine, compiled to WebAssembly.
  *
  * The page assembles the program in the editor, runs it on a complete
- * machine (motherboard, VGA card in a slot, monitor, keyboard) and lets the
- * user switch the power, change the card, and plug peripherals in and out.
- * Everything is called from index.html through the web_* exports.
+ * machine (motherboard, VGA card and diskette adapter in the slots, monitor,
+ * keyboard, drive A:) and lets the user switch the power, change the cards,
+ * plug peripherals in and out, and put diskettes in the drive. Everything is
+ * called from index.html through the web_* exports.
  *
  * A tiny DOS is provided for the program, as in pcrun: INT 20h and
  * INT 21h AH=02h, 09h, 4Ch.
  */
 #include "asm86.h"
+#include "fat12.h"
 #include "pc.h"
+#include "pc_fdc.h"
 #include "pc_vga.h"
 
 #include <stdio.h>
@@ -32,9 +35,15 @@ enum {
 
 static pc_t *pc;
 static pc_vga_card_t *vga;
+static pc_fdc_card_t *fdc;
+static fdd_t *drive_a;
+static disk_t *disk;                  /* the diskette: in drive A: or on the desk */
 static monitor_t *monitors[MONITOR_MODEL_COUNT];
 static kbd_t *keyboards[KBD_MODEL_COUNT];
-static int monitor_id = -1, keyboard_id = -1, card_in;
+static int monitor_id = -1, keyboard_id = -1, card_in, fdc_in;
+static uint8_t image[1474560];        /* a diskette image coming from the page */
+static fat12_entry_t files[224];
+static int file_count;
 
 static char src[SRC_CAP + 1];
 static char scratch[64];
@@ -87,6 +96,10 @@ void WEB(web_init)(void)
     for (i = 0; i < KBD_MODEL_COUNT; i++) keyboards[i] = kbd_create(kbd_builtin_model(i));
     pc_set_int_hook(pc, dos_int, NULL);
     card_in = pc_insert_card(pc, 0, pc_vga_card_slot(vga)) == 0;
+    fdc = pc_fdc_card_create();
+    drive_a = fdd_create(fdd_builtin_model(FDD_MODEL_35_HD));
+    pc_fdc_card_connect_drive(fdc, 0, drive_a);
+    fdc_in = pc_insert_card(pc, 1, pc_fdc_card_slot(fdc)) == 0;
     monitor_id = MONITOR_MODEL_VGA_MONO;
     pc_vga_card_connect_monitor(vga, monitors[monitor_id]);
     keyboard_id = KBD_MODEL_ENHANCED101;
@@ -94,8 +107,9 @@ void WEB(web_init)(void)
     pc_power_on(pc);
 }
 
-/* Power switch. Turning it on boots the machine; without a disk the BIOS
- * says so and waits, so the program is loaded again with web_start(). */
+/* Power switch. Turning it on boots the machine from drive A:; without a
+ * bootable diskette the BIOS says so and waits, and the program is loaded
+ * again with web_start(). */
 void WEB(web_power)(int on)
 {
     loaded = 0;
@@ -113,6 +127,79 @@ int WEB(web_card)(int insert)
     return card_in;
 }
 int WEB(web_card_in)(void) { return card_in; }
+
+/* Slot 2 (index 1): the diskette adapter, with drive A: on its cable. */
+int WEB(web_fdc_card)(int insert)
+{
+    if (pc_status(pc) != PC_OFF) return -1;
+    if (insert && !fdc_in) fdc_in = pc_insert_card(pc, 1, pc_fdc_card_slot(fdc)) == 0;
+    else if (!insert && fdc_in) fdc_in = pc_remove_card(pc, 1) == NULL;
+    return fdc_in;
+}
+int WEB(web_fdc_card_in)(void) { return fdc_in; }
+
+/* ---------- diskettes ---------- */
+
+/* The diskette on the desk is replaced: whatever was in the drive comes out. */
+static void new_disk(disk_t *d)
+{
+    fdd_eject(drive_a);
+    disk_destroy(disk);
+    disk = d;
+    fdd_insert(drive_a, disk);
+}
+
+/* A blank formatted (FAT12) diskette in drive A:. 0: 1.44 MB, 1: 720 KB. */
+int WEB(web_disk_new)(int format)
+{
+    disk_t *d = disk_create(format == 1 ? DISK_720K : DISK_1440K);
+    if (!d) return -1;
+    fat12_format(d, NULL);
+    disk_clear_modified(d);
+    new_disk(d);
+    return 0;
+}
+
+/* An image of len bytes the page put at web_disk_buf(). -1 if it is not
+ * the size of a 1.44 MB or 720 KB diskette. */
+uint8_t *WEB(web_disk_buf)(void) { return image; }
+int WEB(web_disk_buf_cap)(void) { return (int)sizeof(image); }
+int WEB(web_disk_load)(int len)
+{
+    disk_t *d = len > 0 && len <= (int)sizeof(image) ? disk_create_image(image, (size_t)len) : NULL;
+    if (!d) return -1;
+    new_disk(d);
+    return 0;
+}
+
+int WEB(web_disk_present)(void) { return disk != NULL; }
+int WEB(web_disk_in)(void) { return disk && fdd_disk(drive_a) == disk; }
+void WEB(web_disk_insert)(int in)
+{
+    if (!disk) return;
+    if (in) fdd_insert(drive_a, disk);
+    else fdd_eject(drive_a);
+}
+uint8_t *WEB(web_disk_data)(void) { return disk ? disk_data(disk) : NULL; }
+int WEB(web_disk_size)(void) { return disk ? (int)disk_size(disk) : 0; }
+int WEB(web_disk_format)(void) { return disk && disk_geometry(disk)->sectors == 9 ? 1 : 0; }
+void WEB(web_disk_protect)(int on) { if (disk) disk_set_write_protect(disk, on); }
+int WEB(web_disk_protected)(void) { return disk && disk_write_protected(disk); }
+int WEB(web_disk_modified)(void) { return disk && disk_modified(disk); }
+void WEB(web_disk_saved)(void) { if (disk) disk_clear_modified(disk); }
+int WEB(web_drive_light)(void) { return fdd_motor(drive_a); }
+
+/* Root directory: the number of entries (web_disk_file_*), or -1 if the
+ * diskette has no FAT12 file system. */
+int WEB(web_disk_list)(void)
+{
+    file_count = disk ? fat12_list(disk, files, 224) : -1;
+    return file_count;
+}
+const char *WEB(web_disk_file_name)(int i) { return i >= 0 && i < file_count ? files[i].name : ""; }
+int WEB(web_disk_file_size)(int i) { return i >= 0 && i < file_count ? (int)files[i].size : 0; }
+int WEB(web_disk_file_attr)(int i) { return i >= 0 && i < file_count ? files[i].attr : 0; }
+int WEB(web_disk_free)(void) { return disk ? (int)fat12_free_bytes(disk) : 0; }
 
 /* Monitor connector of the VGA card: a MONITOR_MODEL_* or -1 to unplug.
  * Returns -1 when the monitor's plug does not fit the card. */
@@ -171,6 +258,7 @@ int WEB(web_assemble)(int len)
 int WEB(web_err_line)(int i) { return i >= 0 && i < prog.error_count ? prog.errors[i].line : 0; }
 const char *WEB(web_err_msg)(int i) { return i >= 0 && i < prog.error_count ? prog.errors[i].message : ""; }
 int WEB(web_code_size)(void) { return have_prog ? (int)prog.size : 0; }
+int WEB(web_code_origin)(void) { return have_prog ? (int)prog.origin : 0; }   /* 7C00h: a boot sector */
 
 /* Restarts the machine (power cycle, or power on) and loads the assembled
  * program as a .COM. 0, or -1 if there is no program to load. */
@@ -187,6 +275,39 @@ int WEB(web_start)(void)
 
 void WEB(web_stop)(void) { pc_stop(pc); }
 
+/* Restarts the machine without loading anything: the BIOS boots drive A:. */
+void WEB(web_boot)(void)
+{
+    if (pc_status(pc) == PC_OFF) pc_power_on(pc);
+    else pc_reset(pc);
+    loaded = 0;
+    exit_code = 0;
+    error_line = 0;
+}
+
+/* The assembled program as a file (name at web_scratch()) on the diskette.
+ * 0; -1 no program; -2 no FAT12 diskette; -3 bad name or no space. */
+int WEB(web_disk_put_program)(void)
+{
+    scratch[sizeof(scratch) - 1] = 0;
+    if (!have_prog || prog.error_count) return -1;
+    if (!disk || !fat12_valid(disk)) return -2;
+    return fat12_write_file(disk, scratch, prog.code, prog.size) == 0 ? 0 : -3;
+}
+
+/* The assembled program as the diskette's boot sector. 0; -1 no program;
+ * -2 no FAT12 diskette; -3 more than 510 bytes; -4 it does not start with a
+ * short jump over the BPB; -5 not assembled at org 7C00h. */
+int WEB(web_disk_put_boot)(void)
+{
+    if (!have_prog || prog.error_count) return -1;
+    if (!disk || !fat12_valid(disk)) return -2;
+    if (prog.origin != 0x7C00) return -5;
+    if (prog.size > 510) return -3;
+    if (prog.size < 2 || prog.code[0] != 0xEB || prog.code[1] < 0x3C) return -4;
+    return fat12_install_boot(disk, prog.code, prog.size) == 0 ? 0 : -2;
+}
+
 /* Source line of the program at offset ip of its segment, or 0. */
 static int line_at(uint16_t ip)
 {
@@ -198,12 +319,15 @@ static int line_at(uint16_t ip)
     return 0;
 }
 
+/* Not in the BIOS: the BIOS booted something from the diskette. */
+static int booted(void) { return !loaded && vm86_regs(pc_cpu(pc))->cs != 0xF000; }
+
 static int state(void)
 {
     switch (pc_status(pc)) {
     case PC_OFF: return WEB_OFF;
-    case PC_RUNNING: return loaded ? WEB_RUNNING : WEB_IDLE;
-    case PC_HALTED: return loaded ? WEB_HALTED : WEB_IDLE;
+    case PC_RUNNING: return loaded || booted() ? WEB_RUNNING : WEB_IDLE;
+    case PC_HALTED: return loaded || booted() ? WEB_HALTED : WEB_IDLE;
     case PC_STOPPED: return WEB_FINISHED;
     case PC_ERROR: return WEB_ERROR;
     }
@@ -220,7 +344,7 @@ int WEB(web_frame)(double dt, int ips)
         /* An unsupported instruction is reported at its own address; the
          * rest (ports, BIOS calls) once the instruction has executed. */
         vm86_regs_t *r = vm86_regs(pc_cpu(pc));
-        if (r->cs == PC_COM_SEGMENT)
+        if (loaded ? r->cs == PC_COM_SEGMENT : r->cs == 0 && prog.origin == 0x7C00)   /* the program, or its boot sector */
             error_line = strncmp(pc_error(pc), "unsupported instruction", 23) == 0
                              ? line_at(r->ip) : line_at((uint16_t)(r->ip - 1));
     }
@@ -233,7 +357,7 @@ const char *WEB(web_message)(void)
 {
     switch (state()) {
     case WEB_OFF: return "Power is off.";
-    case WEB_RUNNING: return "Running";
+    case WEB_RUNNING: return loaded ? "Running" : "Running from the diskette in drive A:";
     case WEB_HALTED: return "Waiting for an interrupt (HLT)";
     case WEB_FINISHED:
         if (exit_code) snprintf(message, sizeof(message), "Program finished with exit code %d.", exit_code);
@@ -243,7 +367,9 @@ const char *WEB(web_message)(void)
         snprintf(message, sizeof(message), "%s", pc_error(pc));
         if (message[0]) message[0] = (char)(message[0] - (message[0] >= 'a' && message[0] <= 'z' ? 32 : 0));
         return message;
-    default: return card_in ? "No boot device available." : "No video card: nothing to show.";
+    default:
+        if (!card_in) return "No video card: nothing to show.";
+        return fdc_in && fdd_disk(drive_a) ? "The diskette in drive A: is not bootable." : "No boot device available.";
     }
 }
 

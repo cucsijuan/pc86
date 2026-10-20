@@ -273,6 +273,39 @@ kbd { font: 12px var(--mono); padding: 1px 5px; border: 1px solid var(--case-edg
 .port select { flex: 1; min-width: 0; }
 .port button { padding: 9px 12px; }
 button[aria-pressed="false"] { background: var(--case-edge); }
+/* ---------- diskette ---------- */
+.led.on.drive i { background: #5CCB6B; box-shadow: 0 0 6px #5CCB6B; }
+.disk { border-top: 1px solid var(--case-edge); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.disk header { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; }
+.disk h2 { font-size: 16px; line-height: 1.2; margin: 0; font-weight: 600; }
+.disk-state { font-size: 13px; color: var(--ink-soft); }
+.disk .keys { align-items: center; }
+.disk input[type="text"] {
+  font: 13px/1 var(--mono);
+  color: var(--paper-ink);
+  background: var(--paper);
+  border: 1px solid var(--case-edge);
+  border-radius: 6px;
+  padding: 9px 10px;
+  width: 14ch;
+  text-transform: uppercase;
+}
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--paper);
+  color: var(--paper-ink);
+  border: 1px solid var(--case-edge);
+  border-radius: 8px;
+  font: 13px/1.6 var(--mono);
+  max-height: 168px;
+  overflow: auto;
+}
+.files:empty { display: none; }
+.files li { display: flex; justify-content: space-between; gap: 16px; }
+.files li span:last-child { font-variant-numeric: tabular-nums; }
+.files li.dim { color: var(--gutter-ink); }
 @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
 </style>
 </head>
@@ -308,6 +341,7 @@ button[aria-pressed="false"] { background: var(--case-edge); }
         <span class="led power" id="ledPower"><i></i>Power</span>
         <span class="led run" id="ledRun"><i></i>Running</span>
         <span class="led err" id="ledErr"><i></i>Error</span>
+        <span class="led drive" id="ledDrive"><i></i>Drive A:</span>
       </div>
       <div class="leds keyboard-leds" aria-label="Keyboard lights">
         <span class="led lock" id="ledNum"><i></i>Num Lock</span>
@@ -325,6 +359,11 @@ button[aria-pressed="false"] { background: var(--case-edge); }
           <button id="card" type="button">Remove card</button>
         </div>
         <div class="port">
+          <span class="port-name">Slot 2 (ISA) <small>drive A: on its cable</small></span>
+          <span class="port-dev" id="fdcName">Diskette adapter</span>
+          <button id="fdcCard" type="button">Remove card</button>
+        </div>
+        <div class="port">
           <label class="port-name" for="monitor">Monitor <small>on the VGA card</small></label>
           <select id="monitor"></select>
           <button id="monPower" type="button" aria-pressed="true">Monitor power</button>
@@ -335,7 +374,7 @@ button[aria-pressed="false"] { background: var(--case-edge); }
         </div>
       </div>
       <p class="note" id="connNote" aria-live="polite"></p>
-      <p class="note">Cards change only with the power off; the monitor and the keyboard can be plugged in and out while the machine runs. On the board: 8086 CPU, 640 KB, interrupt controller, timer, keyboard controller and speaker. There is no disk yet, so the program is loaded straight into memory. The machine sees a US keyboard; touch screens have no physical keys to send.</p>
+      <p class="note">Cards change only with the power off; the monitor and the keyboard can be plugged in and out while the machine runs. On the board: 8086 CPU, 640 KB, interrupt controller, timer, DMA controller, keyboard controller and speaker. Run loads a .COM program straight into memory; at power on the BIOS boots the diskette in drive A:. The machine sees a US keyboard; touch screens have no physical keys to send.</p>
     </div>
   </section>
 
@@ -351,7 +390,30 @@ button[aria-pressed="false"] { background: var(--case-edge); }
       <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Assembly source (NASM syntax)"></textarea>
     </div>
     <div class="errors" id="errors" aria-live="polite"></div>
-    <p class="hint">NASM syntax for the 8086, assembled as a .COM program at <code>org 100h</code>. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it. Text in strings is stored as code page 437.</p>
+    <p class="hint">NASM syntax for the 8086, assembled as a .COM program at <code>org 100h</code>; a program at <code>org 7C00h</code> is a boot sector, and Run writes it to the diskette and boots. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it. Text in strings is stored as code page 437.</p>
+    <section class="disk" aria-label="Diskette">
+      <header>
+        <h2>Diskette</h2>
+        <span class="disk-state" id="diskState" aria-live="polite"></span>
+      </header>
+      <div class="keys">
+        <button id="diskNew" type="button">New diskette</button>
+        <button id="diskOpen" type="button">Open image…</button>
+        <input type="file" id="diskFile" accept=".img,.ima,.dsk" hidden>
+        <button id="diskSave" type="button">Save image</button>
+        <button id="diskEject" type="button">Eject</button>
+        <label class="inline"><input type="checkbox" id="diskWp"> Write-protected</label>
+      </div>
+      <div class="keys">
+        <label class="inline" for="diskName">Copy the program as</label>
+        <input type="text" id="diskName" value="PROGRAM.COM" maxlength="12" spellcheck="false" autocomplete="off">
+        <button id="diskCopy" type="button">Copy</button>
+        <button id="diskBoot" type="button">Make it the boot sector</button>
+        <button id="bootA" type="button">Boot from A:</button>
+      </div>
+      <ul class="files" id="diskFiles" aria-label="Files on the diskette"></ul>
+      <p class="note" id="diskNote" aria-live="polite"></p>
+    </section>
   </section>
 </main>
 
@@ -391,7 +453,11 @@ const ui = {
   src: $("src"), gutter: $("gutter"), errors: $("errors"), example: $("example"),
   ledPower: $("ledPower"), ledRun: $("ledRun"), ledErr: $("ledErr"),
   crt: $("crt"), glow: $("glow"), screen: $("screen"), kbdHint: $("kbdHint"),
-  ledNum: $("ledNum"), ledCaps: $("ledCaps"), ledScroll: $("ledScroll")
+  ledNum: $("ledNum"), ledCaps: $("ledCaps"), ledScroll: $("ledScroll"),
+  fdcCard: $("fdcCard"), fdcName: $("fdcName"), ledDrive: $("ledDrive"),
+  diskState: $("diskState"), diskNew: $("diskNew"), diskOpen: $("diskOpen"), diskFile: $("diskFile"),
+  diskSave: $("diskSave"), diskEject: $("diskEject"), diskWp: $("diskWp"), diskName: $("diskName"),
+  diskCopy: $("diskCopy"), diskBoot: $("diskBoot"), bootA: $("bootA"), diskFiles: $("diskFiles"), diskNote: $("diskNote")
 };
 const ST = { RUNNING: 0, HALTED: 1, FINISHED: 2, ERROR: 3, IDLE: 4, OFF: 5 };
 const MON = { SHOWING: 0, OFF: 1, NO_SIGNAL: 2, OUT_OF_RANGE: 3, NONE: -1 };
@@ -417,6 +483,7 @@ async function boot() {
   w._initialize();
   w.web_init();
   buildConnections();
+  syncDisk();
 }
 
 // ---------- screen ----------
@@ -493,6 +560,11 @@ function syncConnections() {
   ui.card.disabled = on;
   ui.card.title = on ? "Switch the power off to change cards" : "";
   ui.cardName.textContent = card ? "VGA card" : "Empty";
+  const fdc = !!w.web_fdc_card_in();
+  ui.fdcCard.textContent = fdc ? "Remove card" : "Insert card";
+  ui.fdcCard.disabled = on;
+  ui.fdcCard.title = ui.card.title;
+  ui.fdcName.textContent = fdc ? "Diskette adapter" : "Empty";
   ui.monPower.disabled = mon < 0;
   ui.monPower.setAttribute("aria-pressed", String(!!w.web_monitor_powered()));
   ui.monName.textContent = mon < 0 ? "No monitor" : cname(w.web_monitor_name(mon));
@@ -516,6 +588,11 @@ ui.keyboard.addEventListener("change", () => {
 });
 ui.monPower.addEventListener("click", () => { w.web_monitor_power(w.web_monitor_powered() ? 0 : 1); syncConnections(); });
 ui.card.addEventListener("click", () => { w.web_card(w.web_card_in() ? 0 : 1); note(""); syncConnections(); });
+ui.fdcCard.addEventListener("click", () => {
+  w.web_fdc_card(w.web_fdc_card_in() ? 0 : 1);
+  note(w.web_fdc_card_in() ? "" : "Without the diskette adapter there is no INT 13h: the BIOS finds no boot device.");
+  syncConnections();
+});
 ui.power.addEventListener("click", () => {
   w.web_power(w.web_powered() ? 0 : 1);
   state = w.web_state();
@@ -525,6 +602,120 @@ ui.power.addEventListener("click", () => {
   syncConnections();
 });
 ui.reset.addEventListener("click", run);
+
+// ---------- diskette ----------
+// One diskette on the desk: in drive A: or out of it. The machine writes to
+// it directly; Save image downloads it as a raw .img file.
+let filesShown = "";
+function diskNote(text) { ui.diskNote.textContent = text; }
+function syncDisk() {
+  const present = !!w.web_disk_present(), inDrive = !!w.web_disk_in();
+  ui.diskSave.disabled = ui.diskEject.disabled = ui.diskWp.disabled = !present;
+  ui.diskCopy.disabled = ui.diskBoot.disabled = !present;
+  ui.diskEject.textContent = present && !inDrive ? "Insert" : "Eject";
+  ui.diskWp.checked = !!w.web_disk_protected();
+  let text = "No diskette";
+  if (present) {
+    text = (w.web_disk_format() ? "720 KB" : "1.44 MB") + (inDrive ? ", in drive A:" : ", out of the drive");
+    if (w.web_disk_modified()) text += ", changed since saved";
+  }
+  if (ui.diskState.textContent !== text) ui.diskState.textContent = text;
+  // the listing only changes when the machine or the page writes
+  const n = present ? w.web_disk_list() : 0, rows = [];
+  if (n < 0) rows.push(["Not a FAT12 diskette", "", "dim"]);
+  for (let i = 0; i < n; i++) {
+    const attr = w.web_disk_file_attr(i), name = cstr(w.web_disk_file_name(i));
+    if (attr & 0x08) rows.push(["Volume " + name, "", "dim"]);
+    else rows.push([name, attr & 0x10 ? "<DIR>" : w.web_disk_file_size(i) + " bytes", ""]);
+  }
+  if (present && n >= 0) rows.push([n ? "" : "No files", w.web_disk_free() + " bytes free", "dim"]);
+  const key = JSON.stringify(rows);
+  if (key === filesShown) return;
+  filesShown = key;
+  ui.diskFiles.textContent = "";
+  for (const [a, b, cls] of rows) {
+    const li = document.createElement("li");
+    if (cls) li.className = cls;
+    const s1 = document.createElement("span"), s2 = document.createElement("span");
+    s1.textContent = a; s2.textContent = b;
+    li.append(s1, s2);
+    ui.diskFiles.appendChild(li);
+  }
+}
+ui.diskNew.addEventListener("click", () => {
+  if (w.web_disk_modified() && !confirm("The diskette has changes that were not saved. Replace it with a new one?")) return;
+  w.web_disk_new(0);
+  diskNote("A new formatted 1.44 MB diskette is in drive A:.");
+  syncDisk();
+});
+ui.diskOpen.addEventListener("click", () => ui.diskFile.click());
+ui.diskFile.addEventListener("change", async () => {
+  const file = ui.diskFile.files[0];
+  ui.diskFile.value = "";
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.length > w.web_disk_buf_cap() || (new Uint8Array(w.memory.buffer).set(bytes, w.web_disk_buf()), w.web_disk_load(bytes.length)) !== 0) {
+    diskNote(file.name + " is not a diskette image: it must be a raw 1.44 MB (1,474,560 bytes) or 720 KB (737,280 bytes) image.");
+    return;
+  }
+  diskNote(file.name + " is in drive A:.");
+  syncDisk();
+});
+ui.diskSave.addEventListener("click", () => {
+  const data = new Uint8Array(w.memory.buffer, w.web_disk_data(), w.web_disk_size()).slice();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data], { type: "application/octet-stream" }));
+  a.download = "diskette.img";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  w.web_disk_saved();
+  syncDisk();
+});
+ui.diskEject.addEventListener("click", () => { w.web_disk_insert(w.web_disk_in() ? 0 : 1); diskNote(""); syncDisk(); });
+ui.diskWp.addEventListener("change", () => { w.web_disk_protect(ui.diskWp.checked ? 1 : 0); syncDisk(); });
+function putName() {
+  const b = new TextEncoder().encode(ui.diskName.value.trim().toUpperCase() + "\0");
+  if (b.length > 63) return false;
+  new Uint8Array(w.memory.buffer).set(b, w.web_scratch());
+  return true;
+}
+ui.diskCopy.addEventListener("click", () => {
+  if (!assemble()) return;
+  const r = putName() ? w.web_disk_put_program() : -3;
+  const name = ui.diskName.value.trim().toUpperCase();
+  diskNote(r === 0 ? name + " (" + w.web_code_size() + " bytes) is on the diskette." :
+           r === -2 ? "The diskette has no FAT12 file system: start with a new diskette." :
+           "Cannot copy as " + name + ": it must be an 8.3 name (NAME.EXT) and fit on the diskette.");
+  syncDisk();
+});
+const BOOT_ERRORS = {
+  "-2": "The diskette has no FAT12 file system: start with a new diskette.",
+  "-3": "A boot sector has room for 510 bytes of code.",
+  "-4": "A boot sector starts with a jump over the BPB: jmp short start / nop / times 59 db 0.",
+  "-5": "A boot sector is assembled at org 7C00h, where the BIOS loads it."
+};
+function installBoot() {
+  if (!w.web_disk_present()) w.web_disk_new(0);
+  else if (!w.web_disk_in()) w.web_disk_insert(1);
+  const r = w.web_disk_put_boot();
+  if (r !== 0) diskNote(BOOT_ERRORS[String(r)] || "The program cannot be a boot sector.");
+  syncDisk();
+  return r === 0;
+}
+ui.diskBoot.addEventListener("click", () => {
+  if (!assemble()) return;
+  if (installBoot()) diskNote("The program is the diskette's boot sector (" + w.web_code_size() + " bytes). Boot from A: to run it.");
+});
+ui.bootA.addEventListener("click", bootFromA);
+function bootFromA() {
+  w.web_boot();
+  syncConnections();
+  assemblyFailed = false;
+  state = w.web_state();
+  errorLine = 0;
+  setLeds();
+  setStatus(cstr(w.web_message()));
+}
 
 // ---------- speaker ----------
 // The PC speaker is a square wave from timer channel 2. Browsers only start
@@ -667,7 +858,7 @@ ui.screen.addEventListener("blur", () => {
 window.addEventListener("blur", () => { if (w) w.web_release_keys(); });
 
 // ---------- run loop ----------
-let state = ST.IDLE, last = 0, meterTick = 0, assemblyFailed = false;
+let state = ST.IDLE, last = 0, meterTick = 0, diskTick = 0, assemblyFailed = false;
 function setLeds() {
   ui.ledRun.classList.toggle("on", state === ST.RUNNING);
   ui.ledErr.classList.toggle("on", state === ST.ERROR);
@@ -681,10 +872,11 @@ function setStatus(text, extra) {
   setMeter(extra || "");
 }
 function setMeter(text) { if ($("meter").textContent !== text) $("meter").textContent = text; }
-function run() {
-  if (!w) return;
+// Assembles the editor's text; shows the errors. true if there are none.
+function assemble() {
+  if (!w) return false;
   const { bytes, unknown } = encodeCP437(ui.src.value);
-  if (bytes.length > w.web_src_cap()) { showErrors([{ line: 0, message: "The source is too large." }]); return; }
+  if (bytes.length > w.web_src_cap()) { showErrors([{ line: 0, message: "The source is too large." }]); return false; }
   new Uint8Array(w.memory.buffer).set(bytes, w.web_src());
   const n = w.web_assemble(bytes.length);
   if (n) {
@@ -696,9 +888,20 @@ function run() {
     assemblyFailed = true;
     setLeds();
     setStatus(n === 1 ? "The program has 1 error." : "The program has " + n + " errors.", "Select an error to go to its line.");
-    return;
+    return false;
   }
   showErrors(unknown ? [{ line: 0, message: unknown + " character(s) have no code page 437 equivalent and were stored as “?”." }] : []);
+  return true;
+}
+function run() {
+  if (!assemble()) return;
+  if (w.web_code_origin() === 0x7C00) {               // a boot sector: onto the diskette, then boot
+    if (installBoot()) {
+      diskNote("Run wrote the program to the diskette's boot sector and booted from A:.");
+      bootFromA();
+    }
+    return;
+  }
   w.web_start();
   syncConnections();
   assemblyFailed = false;
@@ -726,6 +929,8 @@ function tick(now) {
     ui.ledScroll.classList.toggle("on", !!(leds & 1));
     ui.ledNum.classList.toggle("on", !!(leds & 2));
     ui.ledCaps.classList.toggle("on", !!(leds & 4));
+    ui.ledDrive.classList.toggle("on", !!w.web_drive_light());
+    if (++diskTick % 30 === 0) syncDisk();              // the machine may have written to it
     const mode = (w.web_mode() === 0x13 ? "mode 13h" : "text mode") + ", " + w.web_seconds().toFixed(1) + " s";
     if (state !== before) {
       const msg = cstr(w.web_message());

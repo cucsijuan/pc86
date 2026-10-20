@@ -4,6 +4,7 @@
 #include "pc.h"
 
 #include "asm86.h"
+#include "dma.h"
 #include "kbc.h"
 #include "pic.h"
 #include "pit.h"
@@ -17,8 +18,10 @@
 #define ROM_BASE       0xF0000u
 #define OFF_POST       0xE05Bu   /* boot: INT 19h, then idle in HLT */
 #define OFF_INT16      0xE82Eu
-#define OFF_INT19      0xE6F2u
+#define OFF_INT19      0xE6F2u   /* bootstrap: real 8086 code */
 #define OFF_INT09      0xE987u
+#define OFF_INT0E      0xEF57u   /* diskette interrupt: real 8086 code */
+#define OFF_INT1E      0xEFC7u   /* diskette parameter table (data) */
 #define OFF_INT12      0xF841u
 #define OFF_INT11      0xF84Du
 #define OFF_INT1A      0xFE6Eu
@@ -52,6 +55,7 @@ struct pc {
     vm86_t *cpu;
     pic_t pic;
     pit_t *pit;
+    dma_t *dma;
     kbc_t *kbc;
     kbd_t *kbd;
     pc_card_t *slot[PC_SLOTS];
@@ -116,12 +120,98 @@ static const char *SRC_INT08 =
     "    mov word [6Ch], 0\n"
     "    mov byte [70h], 1\n"
     "no_midnight:\n"
+    "    dec byte [40h]\n"       /* diskette motor timeout */
+    "    jnz motor_ok\n"
+    "    and byte [3Fh], 0F0h\n"
+    "    push dx\n"
+    "    mov al, 0Ch\n"          /* every motor off, controller enabled */
+    "    mov dx, 3F2h\n"
+    "    out dx, al\n"
+    "    pop dx\n"
+    "motor_ok:\n"
     "    int 1Ch\n"              /* user timer hook */
     "    mov al, 20h\n"
     "    out 20h, al\n"
     "    pop ax\n"
     "    pop ds\n"
     "    iret\n";
+
+/* Reads the boot sector of drive A: and jumps to 0000:7C00 (with an IRET:
+ * the CPU has no far jumps). Returns when there is nothing to boot. */
+static const char *SRC_INT19 =
+    "org 0E6F2h\n"
+    "    sti\n"
+    "    mov cx, 4\n"            /* tries: the first read after a diskette change fails */
+    "retry:\n"
+    "    push cx\n"
+    "    xor ax, ax\n"
+    "    xor dx, dx\n"
+    "    stc\n"                  /* stays set if nothing services INT 13h */
+    "    int 13h\n"              /* reset */
+    "    xor ax, ax\n"
+    "    mov es, ax\n"
+    "    mov bx, 7C00h\n"
+    "    mov ax, 0201h\n"        /* read one sector */
+    "    mov cx, 0001h\n"        /* cylinder 0, sector 1 */
+    "    xor dx, dx\n"           /* head 0, drive A: */
+    "    stc\n"
+    "    int 13h\n"
+    "    pop cx\n"
+    "    jnc loaded\n"
+    "    loop retry\n"
+    "    mov si, no_device\n"
+    "    jmp print\n"
+    "loaded:\n"
+    "    cmp word [es:7DFEh], 0AA55h\n"
+    "    jne not_bootable\n"
+    "    xor ax, ax\n"
+    "    mov ds, ax\n"
+    "    pushf\n"
+    "    push ax\n"              /* CS = 0000h */
+    "    mov ax, 7C00h\n"
+    "    push ax\n"              /* IP = 7C00h */
+    "    xor dx, dx\n"           /* DL = boot drive */
+    "    iret\n"
+    "not_bootable:\n"
+    "    mov si, no_system\n"
+    "print:\n"
+    "    push cs\n"
+    "    pop ds\n"
+    "next:\n"
+    "    lodsb\n"
+    "    or al, al\n"
+    "    jz done\n"
+    "    mov ah, 0Eh\n"
+    "    mov bx, 0007h\n"
+    "    int 10h\n"
+    "    jmp next\n"
+    "done:\n"
+    "    iret\n"
+    "no_device: db 'No boot device available.', 13, 10, 0\n"
+    "no_system: db 'The diskette in drive A: is not bootable.', 13, 10, 0\n";
+
+/* IRQ 6: tells the diskette BIOS (or a program polling 0040:003E) that the
+ * controller finished. */
+static const char *SRC_INT0E =
+    "org 0EF57h\n"
+    "    sti\n"
+    "    push ds\n"
+    "    push ax\n"
+    "    mov ax, 40h\n"
+    "    mov ds, ax\n"
+    "    or byte [3Eh], 80h\n"
+    "    mov al, 20h\n"
+    "    out 20h, al\n"
+    "    pop ax\n"
+    "    pop ds\n"
+    "    iret\n";
+
+/* INT 1Eh: step rate and head unload, head load, motor off delay, 512-byte
+ * sectors, 18 per track, gap, data length, format gap, fill byte, head
+ * settle, motor start. The 1.44 MB values. */
+static const char *SRC_INT1E =
+    "org 0EFC7h\n"
+    "    db 0DFh, 02h, 25h, 02h, 12h, 1Bh, 0FFh, 6Ch, 0F6h, 0Fh, 08h\n";
 
 static const char *SRC_IRQ_OTHER =
     "org 0FF23h\n"
@@ -131,10 +221,11 @@ static const char *SRC_IRQ_OTHER =
     "    pop ax\n"
     "    iret\n";
 
-static int place(pc_t *pc, const char *src)
+/* Assembles a ROM routine at its org; it must end before limit. */
+static int place(pc_t *pc, const char *src, uint32_t limit)
 {
     asm86_result_t a;
-    int ok = asm86_assemble(src, &a) == 0 && a.error_count == 0 && (uint32_t)a.origin + a.size <= 0x10000u;
+    int ok = asm86_assemble(src, &a) == 0 && a.error_count == 0 && (uint32_t)a.origin + a.size <= limit;
     if (ok) memcpy(pc->rom + a.origin, a.code, a.size);
     asm86_free(&a);
     return ok ? 0 : -1;
@@ -142,13 +233,15 @@ static int place(pc_t *pc, const char *src)
 
 static int build_rom(pc_t *pc)
 {
-    static const uint16_t c_entries[] = {OFF_INT09, OFF_INT11, OFF_INT12, OFF_INT16, OFF_INT19, OFF_INT1A, OFF_DUMMY};
+    static const uint16_t c_entries[] = {OFF_INT09, OFF_INT11, OFF_INT12, OFF_INT16, OFF_INT1A, OFF_DUMMY};
     static const uint8_t reset[] = {0xEA, 0x5B, 0xE0, 0x00, 0xF0};      /* JMP F000:E05B */
     static const char date[] = "10/20/26";
     size_t i;
     memset(pc->rom, 0xFF, sizeof(pc->rom));
     for (i = 0; i < sizeof(c_entries) / sizeof(c_entries[0]); i++) pc->rom[c_entries[i]] = 0xCF;   /* IRET */
-    if (place(pc, SRC_POST) || place(pc, SRC_INT08) || place(pc, SRC_IRQ_OTHER)) return -1;
+    if (place(pc, SRC_POST, OFF_INT19) || place(pc, SRC_INT19, OFF_INT16) || place(pc, SRC_INT0E, OFF_INT1E) ||
+        place(pc, SRC_INT1E, OFF_INT12) || place(pc, SRC_INT08, OFF_IRQ_OTHER) || place(pc, SRC_IRQ_OTHER, OFF_DUMMY))
+        return -1;
     memcpy(pc->rom + OFF_RESET, reset, sizeof(reset));
     memcpy(pc->rom + 0xFFF5, date, 8);
     pc->rom[0xFFFE] = 0xFE;                                          /* model byte: PC/XT class */
@@ -156,21 +249,6 @@ static int build_rom(pc_t *pc)
 }
 
 /* ---------- BIOS services in C ---------- */
-
-static int card_bios(pc_t *pc, uint8_t n, vm86_regs_t *r, int *handled);
-
-static void bios_teletype(pc_t *pc, const char *s)
-{
-    vm86_regs_t *r = vm86_regs(pc->cpu), save = *r;
-    int handled;
-    for (; *s; s++) {
-        r->ax = (uint16_t)(0x0E00 | (uint8_t)*s);
-        r->bx = 0x0007;
-        card_bios(pc, 0x10, r, &handled);
-        if (!handled) break;                                         /* no video card */
-    }
-    *r = save;
-}
 
 static int int16(pc_t *pc, vm86_regs_t *g)
 {
@@ -248,6 +326,7 @@ static uint8_t m_in8(void *user, uint16_t port)
     pc_t *pc = (pc_t *)user;
     uint8_t v = 0xFF;
     int r = pic_port_in(&pc->pic, port, &v), s;
+    if (!r) r = dma_port_in(pc->dma, port, &v);
     if (!r) r = pit_port_in(pc->pit, port, &v);
     if (!r) r = kbc_port_in(pc->kbc, port, &v);
     if (!r && port == 0x61) { v = port61_read(pc); r = 1; }
@@ -265,6 +344,7 @@ static void m_out8(void *user, uint16_t port, uint8_t value)
 {
     pc_t *pc = (pc_t *)user;
     int r = pic_port_out(&pc->pic, port, value), s;
+    if (!r) r = dma_port_out(pc->dma, port, value);
     if (!r) r = pit_port_out(pc->pit, port, value);
     if (!r) r = kbc_port_out(pc->kbc, port, value);
     if (!r && port == 0x61) {
@@ -295,10 +375,6 @@ static int m_interrupt(void *user, vm86_t *vm, uint8_t n)
         if (n == 0x11 && off == OFF_INT11) { g->ax = rd16(pc, BDA_EQUIPMENT); return 1; }
         if (n == 0x12 && off == OFF_INT12) { g->ax = rd16(pc, BDA_MEMORY_KB); return 1; }
         if (n == 0x1A && off == OFF_INT1A) return int1a(pc, g);
-        if (n == 0x19 && off == OFF_INT19) {
-            bios_teletype(pc, "No boot device available.\r\n");    /* no storage yet */
-            return 1;
-        }
     }
     res = card_bios(pc, n, g, &handled);
     if (handled) {
@@ -314,6 +390,20 @@ static int m_interrupt(void *user, vm86_t *vm, uint8_t n)
     return 0;                                                        /* through the vector */
 }
 
+/* A card asserting DREQ: the board's 8237 answers. */
+static int bus_dma(void *bus, int channel, uint8_t *buf, size_t len, size_t *moved)
+{
+    pc_t *pc = (pc_t *)bus;
+    int r = dma_transfer(pc->dma, channel, buf, len, moved);
+    if (r == DMA_XFER_UNSUPPORTED) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "unsupported DMA transfer on channel %d (memory-to-memory, cascade or type 3)", channel);
+        fail(pc, msg);
+        return PC_DMA_NO_ACK;
+    }
+    return r == DMA_XFER_TC ? PC_DMA_TC : r == DMA_XFER_DONE ? PC_DMA_DONE : PC_DMA_NO_ACK;
+}
+
 /* ---------- machine ---------- */
 
 pc_t *pc_create(void)
@@ -324,7 +414,8 @@ pc_t *pc_create(void)
     pc->cpu = vm86_create();
     pc->pit = pit_create();
     pc->kbc = pc->cpu ? kbc_create(vm86_memory(pc->cpu)) : NULL;
-    if (!pc->cpu || !pc->pit || !pc->kbc || build_rom(pc) != 0) { pc_destroy(pc); return NULL; }
+    pc->dma = pc->cpu ? dma_create(vm86_memory(pc->cpu)) : NULL;
+    if (!pc->cpu || !pc->pit || !pc->kbc || !pc->dma || build_rom(pc) != 0) { pc_destroy(pc); return NULL; }
     pc->ips = PC_DEFAULT_IPS;
     memset(&h, 0, sizeof(h));
     h.user = pc;
@@ -340,6 +431,7 @@ void pc_destroy(pc_t *pc)
 {
     if (!pc) return;
     if (pc->kbc) kbc_destroy(pc->kbc);
+    if (pc->dma) dma_destroy(pc->dma);
     if (pc->pit) pit_destroy(pc->pit);
     if (pc->cpu) vm86_destroy(pc->cpu);
     free(pc);
@@ -352,6 +444,8 @@ int pc_insert_card(pc_t *pc, int slot, pc_card_t *card)
 {
     if (pc->b.powered || slot < 0 || slot >= PC_SLOTS || pc->slot[slot] || !card) return -1;
     pc->slot[slot] = card;
+    card->dma = bus_dma;
+    card->bus = pc;
     if (card->attach) card->attach(card->user, mem(pc));
     return 0;
 }
@@ -362,6 +456,7 @@ pc_card_t *pc_remove_card(pc_t *pc, int slot)
     if (pc->b.powered || slot < 0 || slot >= PC_SLOTS) return NULL;
     c = pc->slot[slot];
     pc->slot[slot] = NULL;
+    if (c) { c->dma = NULL; c->bus = NULL; }
     return c;
 }
 
@@ -405,6 +500,8 @@ static void post(pc_t *pc)
     for (i = 0x0A; i <= 0x0F; i++) set_vector(pc, (uint8_t)i, ROM_SEG, OFF_IRQ_OTHER);
     set_vector(pc, 0x08, ROM_SEG, OFF_INT08);
     set_vector(pc, 0x09, ROM_SEG, OFF_INT09);
+    set_vector(pc, 0x0E, ROM_SEG, OFF_INT0E);
+    set_vector(pc, 0x1E, ROM_SEG, OFF_INT1E);
     set_vector(pc, 0x11, ROM_SEG, OFF_INT11);
     set_vector(pc, 0x12, ROM_SEG, OFF_INT12);
     set_vector(pc, 0x16, ROM_SEG, OFF_INT16);
@@ -417,7 +514,9 @@ static void post(pc_t *pc)
 
     /* board chips */
     pic_reset(&pc->pic);
+    pc->pic.imr &= (uint8_t)~0x40;    /* IRQ 6 (diskette) enabled too, as the IBM BIOS leaves it */
     pit_reset(pc->pit);
+    dma_reset(pc->dma);
     pc->b.port61 = 0;
     pit_set_gate(pc->pit, 2, 0);
 
@@ -520,6 +619,7 @@ static void slice(pc_t *pc)
     if (pc->kbd) kbd_advance(pc->kbd, PC_SLICE_US);
     for (s = 0; s < PC_SLOTS; s++)
         if (pc->slot[s] && pc->slot[s]->advance) pc->slot[s]->advance(pc->slot[s]->user, PC_SLICE_US);
+    if (pc->b.status == PC_ERROR) return;                            /* a card hit something not emulated (DMA) */
 
     if (pit_take_irq(pc->pit)) pic_raise(&pc->pic, 0);
     if (kbc_take_irq(pc->kbc)) pic_raise(&pc->pic, 1);
@@ -563,7 +663,7 @@ static size_t card_state_size(pc_card_t *c)
 
 size_t pc_state_size(const pc_t *pc)
 {
-    size_t n = vm86_state_size() + sizeof(pic_t) + pit_state_size() + kbc_state_size() + sizeof(pc_board_t);
+    size_t n = vm86_state_size() + sizeof(pic_t) + pit_state_size() + dma_state_size() + kbc_state_size() + sizeof(pc_board_t);
     int s;
     for (s = 0; s < PC_SLOTS; s++) n += card_state_size(pc->slot[s]);
     return n;
@@ -578,6 +678,7 @@ size_t pc_save_state(const pc_t *pc, void *buf, size_t len)
     n = vm86_save_state(pc->cpu, p, len); p += n;
     memcpy(p, &pc->pic, sizeof(pic_t)); p += sizeof(pic_t);
     n = pit_save_state(pc->pit, p, pit_state_size()); p += n;
+    n = dma_save_state(pc->dma, p, dma_state_size()); p += n;
     n = kbc_save_state(pc->kbc, p, kbc_state_size()); p += n;
     memcpy(p, &pc->b, sizeof(pc_board_t)); p += sizeof(pc_board_t);
     for (s = 0; s < PC_SLOTS; s++) {
@@ -597,6 +698,8 @@ int pc_load_state(pc_t *pc, const void *buf, size_t len)
     memcpy(&pc->pic, p, sizeof(pic_t)); p += sizeof(pic_t);
     if (pit_load_state(pc->pit, p, pit_state_size()) != 0) return -1;
     p += pit_state_size();
+    if (dma_load_state(pc->dma, p, dma_state_size()) != 0) return -1;
+    p += dma_state_size();
     if (kbc_load_state(pc->kbc, p, kbc_state_size()) != 0) return -1;
     p += kbc_state_size();
     memcpy(&pc->b, p, sizeof(pc_board_t)); p += sizeof(pc_board_t);

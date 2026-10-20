@@ -49,7 +49,8 @@ enum {
     M_INC, M_DEC, M_NOT, M_NEG, M_MUL, M_IMUL, M_DIV, M_IDIV,
     M_ROL, M_ROR, M_RCL, M_RCR, M_SHL, M_SHR, M_SAR,
     M_PUSH, M_POP,
-    M_JMP, M_CALL, M_RET, M_IRET, M_INT, M_INT3,
+    M_JMP, M_CALL, M_RET, M_RETF, M_IRET, M_INT, M_INT3,
+    M_LDS,  /* LDS/LES, opcode in cc_or_byte */
     M_JCC,  /* + condition code in cc_or_byte */
     M_LOOP, M_LOOPE, M_LOOPNE, M_JCXZ,
     M_IN, M_OUT,
@@ -67,6 +68,7 @@ static const mnem_t MNEMS[] = {
     {"add", M_ADD, 0, 0}, {"or", M_OR, 1, 0}, {"adc", M_ADC, 2, 0}, {"sbb", M_SBB, 3, 0},
     {"and", M_AND, 4, 0}, {"sub", M_SUB, 5, 0}, {"xor", M_XOR, 6, 0}, {"cmp", M_CMP, 7, 0},
     {"mov", M_MOV, 0, 0}, {"xchg", M_XCHG, 0, 0}, {"test", M_TEST, 0, 0}, {"lea", M_LEA, 0, 0},
+    {"lds", M_LDS, 0xC5, 0}, {"les", M_LDS, 0xC4, 0},
     {"inc", M_INC, 0, 0}, {"dec", M_DEC, 1, 0},
     {"not", M_NOT, 2, 0}, {"neg", M_NEG, 3, 0}, {"mul", M_MUL, 4, 0}, {"imul", M_IMUL, 5, 0},
     {"div", M_DIV, 6, 0}, {"idiv", M_IDIV, 7, 0},
@@ -74,7 +76,7 @@ static const mnem_t MNEMS[] = {
     {"shl", M_SHL, 4, 0}, {"sal", M_SHL, 4, 0}, {"shr", M_SHR, 5, 0}, {"sar", M_SAR, 7, 0},
     {"push", M_PUSH, 0, 0}, {"pop", M_POP, 0, 0},
     {"jmp", M_JMP, 0, 0}, {"call", M_CALL, 0, 0}, {"ret", M_RET, 0, 0}, {"retn", M_RET, 0, 0},
-    {"iret", M_IRET, 0, 0}, {"int", M_INT, 0, 0}, {"int3", M_INT3, 0, 0},
+    {"retf", M_RETF, 0, 0}, {"iret", M_IRET, 0, 0}, {"int", M_INT, 0, 0}, {"int3", M_INT3, 0, 0},
     {"jo", M_JCC, 0, 0}, {"jno", M_JCC, 1, 0},
     {"jb", M_JCC, 2, 0}, {"jc", M_JCC, 2, 0}, {"jnae", M_JCC, 2, 0},
     {"jae", M_JCC, 3, 0}, {"jnb", M_JCC, 3, 0}, {"jnc", M_JCC, 3, 0},
@@ -109,8 +111,8 @@ static const mnem_t MNEMS[] = {
 
 /* Real 8086 instructions this machine does not support (clear error). */
 static const char *UNSUPPORTED_8086[] = {
-    "daa", "das", "aaa", "aas", "aam", "aad", "xlat", "xlatb", "lds", "les",
-    "lock", "wait", "fwait", "esc", "into", "retf", "salc", NULL
+    "daa", "das", "aaa", "aas", "aam", "aad", "xlat", "xlatb",
+    "lock", "wait", "fwait", "esc", "into", "salc", NULL
 };
 
 /* Instructions from later CPUs (error explains why). */
@@ -713,7 +715,7 @@ static val_t eval_range(asm_t *A, int beg, int end, int line, int *err)
 /* ====================================================================== */
 
 enum { O_NONE, O_REG8, O_REG16, O_SREG, O_IMM, O_MEM };
-enum { J_DEFAULT, J_SHORT, J_NEAR };
+enum { J_DEFAULT, J_SHORT, J_NEAR, J_FAR };
 
 typedef struct {
     int type;
@@ -721,7 +723,9 @@ typedef struct {
     int size;          /* 0 unspecified, 1 byte, 2 word */
     int imm_size;      /* size keyword given on the immediate (byte/word) */
     int jmod;
-    val_t imm;
+    val_t imm;         /* the offset, for segment:offset */
+    int far_imm;       /* immediate written as segment:offset */
+    val_t far_seg;
     /* memory */
     int seg;           /* -1 or 0..3 */
     int base;          /* -1, 3 (bx), 5 (bp) */
@@ -818,7 +822,7 @@ static int parse_operand(asm_t *A, int beg, int end, int line, opnd_t *o)
         else if (tok_ieq(t, "short")) { o->jmod = J_SHORT; beg++; }
         else if (tok_ieq(t, "near")) { o->jmod = J_NEAR; beg++; }
         else if (tok_ieq(t, "strict")) { beg++; }
-        else if (tok_ieq(t, "far")) { add_error(A, line, 0, "far jumps and calls (FAR) are not supported on this machine"); return 0; }
+        else if (tok_ieq(t, "far")) { o->jmod = J_FAR; beg++; }
         else if (tok_ieq(t, "dword") || tok_ieq(t, "qword") || tok_ieq(t, "tword")) {
             add_error(A, line, 0, "the 8086 only has BYTE and WORD operands"); return 0;
         } else break;
@@ -859,10 +863,24 @@ static int parse_operand(asm_t *A, int beg, int end, int line, opnd_t *o)
         return 0;
     }
     {
-        int err;
+        int err, i, depth = 0;
         o->type = O_IMM;
         o->imm_size = o->size;
         o->size = 0;
+        /* segment:offset (far JMP/CALL) */
+        for (i = beg; i < end; i++) {
+            t = &A->toks[i];
+            if (t->type == TK_PUNCT && t->punct == '(') depth++;
+            if (t->type == TK_PUNCT && t->punct == ')') depth--;
+            if (depth == 0 && t->type == TK_PUNCT && t->punct == ':') {
+                o->far_imm = 1;
+                o->far_seg = eval_range(A, beg, i, line, &err);
+                if (err) return 0;
+                beg = i + 1;
+                if (beg >= end) { add_error(A, line, 0, "missing offset after ':'"); return 0; }
+                break;
+            }
+        }
         o->imm = eval_range(A, beg, end, line, &err);
         return !err;
     }
@@ -997,6 +1015,10 @@ static int encode_instr(asm_t *A, stmt_t *s, enc_t *e)
 #define BAD() do { add_error(A, line, 0, "invalid combination of operands for %s", s->mnem->name); return 0; } while (0)
 
     for (i = 0; i < n; i++) {
+        if ((o[i].jmod == J_FAR || o[i].far_imm) && id != M_JMP && id != M_CALL) {
+            add_error(A, line, 0, "FAR and segment:offset can only be used on JMP and CALL");
+            return 0;
+        }
         if (o[i].type == O_IMM && o[i].jmod && id != M_JMP && id != M_JCC && id != M_CALL &&
             id != M_LOOP && id != M_LOOPE && id != M_LOOPNE && id != M_JCXZ) {
             add_error(A, line, 0, "SHORT/NEAR can only be used on jumps");
@@ -1152,6 +1174,16 @@ static int encode_instr(asm_t *A, stmt_t *s, enc_t *e)
         return 1;
     }
 
+    case M_LDS:
+        NEED(2);
+        if (o[0].type != O_REG16 || o[1].type != O_MEM) {
+            add_error(A, line, 0, "%s takes a 16-bit register and a far pointer in memory: %s si, [label]",
+                      s->mnem->name, s->mnem->name);
+            return 0;
+        }
+        seg_prefix(e, &o[1]); eb(e, s->mnem->cc_or_byte); modrm(A, s, e, o[0].reg, &o[1], 1);
+        return 1;
+
     case M_LEA:
         NEED(2);
         if (o[0].type != O_REG16 || o[1].type != O_MEM) {
@@ -1212,6 +1244,22 @@ static int encode_instr(asm_t *A, stmt_t *s, enc_t *e)
 
     case M_JMP: case M_CALL:
         NEED(1);
+        if (o[0].far_imm) {
+            if (o[0].jmod == J_SHORT || o[0].jmod == J_NEAR) BAD();
+            if (!check_word(A, line, o[0].far_seg) || !check_word(A, line, o[0].imm)) return 0;
+            eb(e, id == M_CALL ? 0x9A : 0xEA); ew(e, o[0].imm.v); ew(e, o[0].far_seg.v);
+            return 1;
+        }
+        if (o[0].jmod == J_FAR) {
+            if (o[0].type == O_IMM) {
+                add_error(A, line, 0, "a far %s needs segment:offset (%s 0000h:7C00h) or a pointer in memory (%s far [bx])",
+                          s->mnem->name, s->mnem->name, s->mnem->name);
+                return 0;
+            }
+            if (o[0].type != O_MEM || o[0].size == 1) BAD();
+            seg_prefix(e, &o[0]); eb(e, 0xFF); modrm(A, s, e, id == M_CALL ? 3 : 5, &o[0], 0);
+            return 1;
+        }
         if (o[0].type == O_IMM) {
             if (id == M_CALL) {
                 if (o[0].jmod == J_SHORT) { add_error(A, line, 0, "CALL has no SHORT form"); return 0; }
@@ -1256,6 +1304,13 @@ static int encode_instr(asm_t *A, stmt_t *s, enc_t *e)
         NEED(1);
         if (o[0].type != O_IMM || !check_word(A, line, o[0].imm)) BAD();
         eb(e, 0xC2); ew(e, o[0].imm.v);
+        return 1;
+
+    case M_RETF:
+        if (n == 0) { eb(e, 0xCB); return 1; }
+        NEED(1);
+        if (o[0].type != O_IMM || !check_word(A, line, o[0].imm)) BAD();
+        eb(e, 0xCA); ew(e, o[0].imm.v);
         return 1;
 
     case M_IRET:

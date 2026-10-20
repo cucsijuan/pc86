@@ -3,10 +3,10 @@
  *
  * Included: the whole 8086 except what is listed under "Not supported".
  * Not supported (stops the CPU with VM86_ERR_UNSUPPORTED):
- *   BCD (DAA DAS AAA AAS AAM AAD), XLAT, LDS, LES, LOCK, WAIT, ESC (FPU),
- *   far CALL/JMP/RET (INT/IRET are supported), INTO, POP CS, MOV CS,
- *   aliases and undocumented opcodes (60-6F, 82, C0, C1, C8, C9, D6, F1,
- *   F6/F7 /1, D0-D3 /6, etc.) and LEA with a register operand.
+ *   BCD (DAA DAS AAA AAS AAM AAD), XLAT, LOCK, WAIT, ESC (FPU), INTO,
+ *   POP CS, MOV CS, aliases and undocumented opcodes (60-6F, 82, C0, C1,
+ *   C8, C9, D6, F1, F6/F7 /1, D0-D3 /6, etc.) and LEA, LDS, LES and
+ *   far CALL/JMP through memory (FF /3, FF /5) with a register operand.
  * Not emulated: cycle timing, prefetch queue, TF single-step trap.
  */
 #include "vm86.h"
@@ -574,6 +574,7 @@ static void step(vm86_t *vm)
         a = R.ax; R.ax = *r16p(vm, c.op); *r16p(vm, c.op) = a; return;
     case 0x98: R.ax = (uint16_t)(int16_t)(int8_t)get_r8(vm, 0); return;
     case 0x99: R.dx = (R.ax & 0x8000) ? 0xFFFF : 0; return;
+    case 0x9A: a = fetch16(vm); b = fetch16(vm); push16(vm, R.cs); push16(vm, R.ip); R.cs = b; R.ip = a; return;
     case 0x9C: push16(vm, norm_flags(F)); return;
     case 0x9D: F = norm_flags(pop16(vm)); return;
     case 0x9E: F = norm_flags((uint16_t)((F & 0xFF00) | (get_r8(vm, 4) & 0xD5))); return;
@@ -596,11 +597,21 @@ static void step(vm86_t *vm)
 
     case 0xC2: a = fetch16(vm); R.ip = pop16(vm); R.sp = (uint16_t)(R.sp + a); return;
     case 0xC3: R.ip = pop16(vm); return;
+    case 0xC4: case 0xC5:
+        decode_modrm(&c);
+        if (c.mod == 3) { unsupported(&c, c.reg); return; }
+        a = rd16(vm, c.ea_seg, c.ea_off);
+        b = rd16(vm, c.ea_seg, (uint16_t)(c.ea_off + 2));
+        *r16p(vm, c.reg) = a;
+        *sregp(vm, c.op == 0xC4 ? ES_ : DS_) = b;
+        return;
     case 0xC6: case 0xC7:
         decode_modrm(&c);
         if (c.reg != 0) { unsupported(&c, c.reg); return; }
         set_e(&c, w, w ? fetch16(vm) : fetch8(vm));
         return;
+    case 0xCA: a = fetch16(vm); R.ip = pop16(vm); R.cs = pop16(vm); R.sp = (uint16_t)(R.sp + a); return;
+    case 0xCB: R.ip = pop16(vm); R.cs = pop16(vm); return;
     case 0xCC: do_interrupt(vm, 3); return;
     case 0xCD: do_interrupt(vm, fetch8(vm)); return;
     case 0xCF: R.ip = pop16(vm); R.cs = pop16(vm); F = norm_flags(pop16(vm)); return;
@@ -630,6 +641,7 @@ static void step(vm86_t *vm)
     case 0xE7: a = fetch8(vm); port_out8(vm, a, (uint8_t)R.ax); port_out8(vm, (uint16_t)(a + 1), (uint8_t)(R.ax >> 8)); return;
     case 0xE8: a = fetch16(vm); push16(vm, R.ip); R.ip = (uint16_t)(R.ip + a); return;
     case 0xE9: a = fetch16(vm); R.ip = (uint16_t)(R.ip + a); return;
+    case 0xEA: a = fetch16(vm); b = fetch16(vm); R.cs = b; R.ip = a; return;
     case 0xEB: { int8_t rel = (int8_t)fetch8(vm); R.ip = (uint16_t)(R.ip + rel); return; }
     case 0xEC: set_r8(vm, 0, port_in8(vm, R.dx)); return;
     case 0xED: R.ax = (uint16_t)(port_in8(vm, R.dx) | (port_in8(vm, (uint16_t)(R.dx + 1)) << 8)); return;
@@ -665,6 +677,13 @@ static void step(vm86_t *vm)
         switch (c.reg) {
         case 0: case 1: set_e(&c, 1, do_inc_dec(vm, get_e(&c, 1), c.reg, 1)); return;
         case 2: a = get_e(&c, 1); push16(vm, R.ip); R.ip = a; return;
+        case 3: case 5: /* far: offset, then segment */
+            if (c.mod == 3) { unsupported(&c, c.reg); return; }
+            a = rd16(vm, c.ea_seg, c.ea_off);
+            b = rd16(vm, c.ea_seg, (uint16_t)(c.ea_off + 2));
+            if (c.reg == 3) { push16(vm, R.cs); push16(vm, R.ip); }
+            R.cs = b; R.ip = a;
+            return;
         case 4: R.ip = get_e(&c, 1); return;
         case 6:
             if (c.mod == 3 && c.rm == 4) { R.sp -= 2; wr16(vm, R.ss, R.sp, R.sp); }

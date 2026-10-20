@@ -21,11 +21,11 @@ PLAIN = (
     + [f"{o:02X}" for o in range(0x40, 0x60)]
     + [f"{o:02X}" for o in range(0x70, 0x80)]
     + ["84", "85", "86", "87", "88", "89", "8A", "8B", "8C", "8D", "8E"]
-    + [f"{o:02X}" for o in range(0x90, 0x9A)]
+    + [f"{o:02X}" for o in range(0x90, 0x9B)]
     + ["9C", "9D", "9E", "9F"]
     + [f"{o:02X}" for o in range(0xA0, 0xC0)]
-    + ["C2", "C3", "CC", "CD", "CF"]
-    + ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "EB", "EC", "ED", "EE", "EF"]
+    + ["C2", "C3", "C4", "C5", "CA", "CB", "CC", "CD", "CF"]
+    + ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "EA", "EB", "EC", "ED", "EE", "EF"]
     + ["F5", "F8", "F9", "FA", "FB", "FC", "FD"]
 )
 GROUPS = {
@@ -34,7 +34,7 @@ GROUPS = {
     "D0": [0, 1, 2, 3, 4, 5, 7], "D1": [0, 1, 2, 3, 4, 5, 7],
     "D2": [0, 1, 2, 3, 4, 5, 7], "D3": [0, 1, 2, 3, 4, 5, 7],
     "F6": [0, 2, 3, 4, 5, 6, 7], "F7": [0, 2, 3, 4, 5, 6, 7],
-    "FE": [0, 1], "FF": [0, 1, 2, 4, 6],
+    "FE": [0, 1], "FF": [0, 1, 2, 3, 4, 5, 6],
 }
 STRING_OPS = {0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF}
 PREFIXES = {0x26, 0x2E, 0x36, 0x3E, 0xF2, 0xF3}
@@ -70,11 +70,19 @@ def fetch(cache, name):
         return json.load(f)
 
 
-def modrm_reg(bytes_):
+def modrm(bytes_):
     i = 0
     while bytes_[i] in PREFIXES:
         i += 1
-    return (bytes_[i + 1] >> 3) & 7
+    return bytes_[i + 1]
+
+
+def modrm_reg(bytes_):
+    return (modrm(bytes_) >> 3) & 7
+
+
+def reg_operand(bytes_):
+    return modrm(bytes_) >> 6 == 3
 
 
 # Cases vm86 deliberately excludes within supported opcodes.
@@ -84,6 +92,10 @@ SKIP = {
     "8F": lambda b: modrm_reg(b) != 0,                      # only /0 is POP
     "C6": lambda b: modrm_reg(b) != 0,                      # only /0 is MOV
     "C7": lambda b: modrm_reg(b) != 0,
+    "C4": reg_operand,                                      # LES/LDS/far CALL/JMP with a register:
+    "C5": reg_operand,                                      # undefined on the 8086
+    "FF.3": reg_operand,
+    "FF.5": reg_operand,
 }
 
 

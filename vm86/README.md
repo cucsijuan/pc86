@@ -11,10 +11,10 @@ Both also compile as C++, so they can be dropped into an Unreal module as-is.
 
 | Check | Result |
 |---|---|
-| CPU vs [SingleStepTests/8088](https://github.com/SingleStepTests/8088) (tests captured from a physical 8088) | 263 opcodes and groups, ~1.3 million cases, 0 failures |
+| CPU vs [SingleStepTests/8088](https://github.com/SingleStepTests/8088) (tests captured from a physical 8088) | 271 opcodes and groups, ~1.4 million cases, 0 failures |
 | Assembler vs NASM 2.16 (random programs) | 6,000+ programs (~275,000 lines), byte-for-byte identical output; also agrees on what to reject |
-| Error messages | 53 cases checked (text and line number) |
-| API tests (REP across frames, save state, IRQs, HLT, ports...) | 16/16 |
+| Error messages | 58 cases checked (text and line number) |
+| API tests (REP across frames, save state, IRQs, HLT, ports, far transfers...) | 28/28 |
 | Example programs (assemble + run + compare output) | 6/6 |
 | Robustness under AddressSanitizer + UBSan (6,000 broken or mutated sources) | 0 memory errors or undefined behavior |
 
@@ -124,10 +124,12 @@ Errors are reported **all at once, sorted by line**, with hints on how to fix th
 The whole 8086 except the following, which stop the CPU with `VM86_ERR_UNSUPPORTED` instead of behaving differently:
 
 - BCD: `DAA DAS AAA AAS AAM AAD`
-- `XLAT`, `LDS`, `LES`, `LOCK`, `WAIT`, `ESC` (FPU), `INTO`
-- Far jumps, calls and returns (`CALL/JMP FAR`, `RETF`). `INT`/`IRET` are supported.
-- `POP CS`, `MOV CS, ...`, `LEA` with a register operand
+- `XLAT`, `LOCK`, `WAIT`, `ESC` (FPU), `INTO`
+- `POP CS`, `MOV CS, ...`
+- `LEA`, `LDS`, `LES` and far `CALL`/`JMP` through memory (`FF /3`, `FF /5`) with a register operand, which have no defined behavior on the 8086
 - Aliases and undocumented opcodes (60–6F, 82, C0, C1, C8, C9, D6, F1, F6/F7 /1, D0–D3 /6...)
+
+Far jumps, calls and returns (`JMP`/`CALL` to `segment:offset` or through a far pointer in memory, `RETF`, `RETF n`) and `LDS`/`LES` are included.
 
 It does include the real 8086 quirks verified against hardware: `PUSH SP` pushes the already decremented value, FLAGS bits 12–15 always read as 1, `IDIV` does not allow a quotient of -128/-32768, and `REP` before `IDIV` negates the quotient.
 
@@ -140,6 +142,7 @@ Cycle timing, the prefetch queue and the single-step trap (TF) are not emulated.
 - Expressions `+ - * / // % %% << >> & | ^ ~ ! ( )`, with `$` (start of the line) and `$$` (start of the program).
 - Directives `org`, `db`, `dw`, `resb`, `resw`, `times`, `equ`, `bits 16`, `cpu 8086`.
 - Operands: registers, immediates, `[bx+si+disp]`, `[es:di]`, `byte`/`word`, `short`/`near` on jumps.
+- Far jumps and calls, as in NASM: `jmp 0000h:7C00h`, `call 1234h:label`, `call far [bx]`, `jmp far [si]`; also `retf`, `retf 4`, `lds si, [bx]`, `les di, [label]`.
 - Prefixes `rep`, `repe`, `repz`, `repne`, `repnz`.
 - Every instruction the CPU supports, always choosing the same encoding as NASM: short jumps when they fit, sign-extended 8-bit immediates when they fit, 16-bit displacements when a label is involved, and so on.
 

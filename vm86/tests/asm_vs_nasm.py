@@ -71,7 +71,7 @@ class Gen:
 
     def instr(self, local_labels, global_labels):
         r = self.r
-        k = r.randrange(26)
+        k = r.randrange(27)
         if k == 0:
             op = self.c(ALU)
             f = r.randrange(6)
@@ -168,6 +168,14 @@ class Gen:
             return f"mov {self.c(R16)}, {self.c(['dat', 'data_end', '$', 'café_block0', 'data_end-dat', '$$'])}"
         if k == 24:
             return f"mov {self.mem()}, word {self.imm16()}"
+        if k == 25:
+            seg = self.c(["0", "0F000h", "0FFFFh", "1234h", "KA", "FWDK", "KB*2"])
+            t = self.c(global_labels + local_labels + ["7C00h", "0", "dat"])
+            return self.c([f"jmp {seg}:{t}", f"call {seg}:{t}", f"jmp far {seg}:{t}",
+                           f"jmp {seg}:{self.imm16()}", f"call far {self.mem()}", f"jmp far {self.mem()}",
+                           f"call far word [{self.c(BASES)}]", "retf", f"retf {self.imm16()}"])
+        if k == 26:
+            return f"{self.c(['lds', 'les'])} {self.c(R16)}, {self.mem()}"
         return f"{self.c(['add', 'sub', 'cmp'])} {self.c(R16)}, {self.c(['KA', 'KB', 'FWDK', 'dat', 'byte 3'])}"
 
     def program(self):

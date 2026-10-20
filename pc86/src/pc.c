@@ -136,8 +136,8 @@ static const char *SRC_INT08 =
     "    pop ds\n"
     "    iret\n";
 
-/* Reads the boot sector of drive A: and jumps to 0000:7C00 (with an IRET:
- * the CPU has no far jumps). Returns when there is nothing to boot. */
+/* Reads the boot sector of drive A: and jumps to 0000:7C00 (with an IRET).
+ * Returns when there is nothing to boot. */
 static const char *SRC_INT19 =
     "org 0E6F2h\n"
     "    sti\n"

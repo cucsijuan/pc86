@@ -92,7 +92,7 @@ build/pcrun program.com [--seconds S] [--every N] [--out prefix] [--ips N] [--co
 
 Services are provided in C while the vector still points at the BIOS address; a program that installs its own handler gets the real behavior, as on a real PC. The POST leaves IRQ 0, 1 and 6 enabled in the PIC.
 
-The CPU has no far jumps, calls or returns yet (see [vm86](../vm86)): the bootstrap enters the boot sector with an `IRET`, and a boot sector cannot use `JMP FAR`/`RETF` either.
+The bootstrap enters the boot sector at `0000:7C00` with an `IRET`. Boot sectors and loaders can use far jumps, calls and returns (`jmp 0000h:7C00h`, `call far [bx]`, `retf`) and `LDS`/`LES`, for example to read the diskette parameter table through the `INT 1Eh` vector (see [vm86](../vm86)).
 
 ### Ports
 

@@ -32,7 +32,7 @@ next_key:
 
 ; The BIOS only moves the cursor for a backspace (as on a real PC), so the
 ; program erases the character itself, and at the start of a line goes back
-; to the end of the previous one.
+; to the previous one and erases its last character.
 .backspace:
     call get_cursor
     test dl, dl
@@ -45,7 +45,7 @@ next_key:
     cmp dh, 2               ; first typing row
     jbe next_key
     dec dh
-    call end_of_line
+    call erase_last
     jmp next_key
 
 ; Arrows move the cursor around the typing area (rows 2-24).
@@ -135,9 +135,9 @@ erase:                      ; blank at the cursor, which stays there
     int 10h
     ret
 
-; end_of_line: puts the cursor after the last character of row DH
-; (on the last column if the row is full)
-end_of_line:
+; erase_last: erases the last character of row DH and leaves the cursor in
+; its place (column 0 if the row is empty)
+erase_last:
     mov dl, 79
 .scan:
     call set_cursor
@@ -153,11 +153,9 @@ end_of_line:
     dec dl
     jmp .scan
 .found:
-    cmp dl, 79
-    jae .done
-    inc dl
+    call erase
 .done:
-    jmp set_cursor
+    ret
 
 print:                      ; prints the 0-terminated string at SI
     lodsb

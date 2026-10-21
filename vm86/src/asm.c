@@ -5,6 +5,11 @@
  * Then several passes compute addresses and sizes until nothing changes
  * (like NASM's multi-pass optimizer, which picks the shortest form of each
  * jump and immediate). A final pass emits the bytes and reports errors.
+ *
+ * Sections, as in NASM's flat binary output: .text first, then .data and
+ * .bss, each starting at an address that is a multiple of 4. .bss takes
+ * addresses but no room in the output. Each pass places them with the
+ * sizes the previous pass found.
  */
 #include "asm86.h"
 
@@ -207,7 +212,10 @@ static int is_keyword(const tok_t *t)
 /* Assembler data structures                                              */
 /* ====================================================================== */
 
-enum { K_EMPTY, K_INSTR, K_DB, K_DW, K_RESB, K_RESW, K_EQU, K_ORG, K_IGNORE, K_ERROR };
+enum { K_EMPTY, K_INSTR, K_DB, K_DW, K_RESB, K_RESW, K_EQU, K_ORG, K_IGNORE, K_ERROR, K_SECTION };
+
+enum { SEC_TEXT, SEC_DATA, SEC_BSS, SEC_COUNT };
+static const char *SECTION_NAMES[SEC_COUNT] = { ".text", ".data", ".bss" };
 
 #define MAX_OPS 3
 
@@ -223,6 +231,7 @@ typedef struct {
     int op_beg[MAX_OPS], op_end[MAX_OPS];
     uint16_t addr, size;
     uint8_t sticky;             /* bits: 1 long jump, 2/4 long displacement, 8 long immediate */
+    uint8_t section;            /* K_SECTION: the section it switches to */
 } stmt_t;
 
 typedef struct {
@@ -256,7 +265,10 @@ typedef struct {
 
     int last_global;            /* token of the last non-local label, or -1 */
 
-    uint8_t *out; size_t outlen, outcap;
+    uint8_t *out; size_t outlen;  /* the last pass: 64 KB, bytes at address - org */
+    int64_t wpos;               /* where out_bytes writes (an address) */
+    int sec;                    /* the current section */
+    int64_t sec_base[SEC_COUNT], sec_addr[SEC_COUNT], sec_size[SEC_COUNT];
     asm86_line_t *lines; int nlines, caplines;
     asm86_result_t *res;
     int stmt_failed;            /* the current statement had an error */
@@ -426,7 +438,7 @@ static int lex_line(asm_t *A, const char *p, const char *e, int line)
                 else if (c == '/' && p[1] == '/') { t.punct = P_SDIV; t.len = 2; }
                 else if (c == '%' && p[1] == '%') { t.punct = P_SMOD; t.len = 2; }
             }
-            if (!strchr(",[]:()+-*/%|^&~!", c) && t.len == 1) {
+            if (!strchr(",[]:()+-*/%|^&~!=", c) && t.len == 1) {
                 add_error(A, line, 1, "unexpected character: '%c'", c);
                 return 0;
             }
@@ -560,7 +572,7 @@ static val_t ex_primary(ex_t *x)
         return r;
     }
     case TK_DOLLAR: x->pos++; r.v = A->line_start; r.reloc = 1; return r;
-    case TK_DOLLAR2: x->pos++; r.v = A->org; r.reloc = 1; return r;
+    case TK_DOLLAR2: x->pos++; r.v = A->sec_base[A->sec]; r.reloc = 1; return r;
     case TK_PUNCT:
         if (t->punct == '(') {
             x->pos++;
@@ -1429,7 +1441,7 @@ static void parse_stmt(asm_t *A, stmt_t *s, int i, int end)
         s->times_beg = i + 1;
         s->times_end = e2;
         parse_stmt(A, s, e2, end);
-        if (s->kind == K_EQU || s->kind == K_ORG || s->kind == K_IGNORE) {
+        if (s->kind == K_EQU || s->kind == K_ORG || s->kind == K_IGNORE || s->kind == K_SECTION) {
             add_error(A, s->line, 1, "TIMES cannot be used with this directive");
             s->kind = K_ERROR;
         }
@@ -1479,10 +1491,30 @@ static void parse_stmt(asm_t *A, stmt_t *s, int i, int end)
         add_error(A, s->line, 1, "'%.*s' is not supported; use db/dw (bytes and words)", t->len, t->s);
         s->kind = K_ERROR;
         return;
-    case D_SECTION:
-        add_error(A, s->line, 1, "SECTION is not needed: the program is a single segment, like a .COM");
-        s->kind = K_ERROR;
+    case D_SECTION: {
+        int k;
+        const tok_t *n = &A->toks[i + 1];
+        if (end - i < 2 || n->type != TK_ID) {
+            add_error(A, s->line, 1, "SECTION needs a name: .text, .data or .bss");
+            s->kind = K_ERROR;
+            return;
+        }
+        for (k = 0; k < SEC_COUNT; k++)
+            if ((int)strlen(SECTION_NAMES[k]) == n->len && !memcmp(SECTION_NAMES[k], n->s, (size_t)n->len)) break;
+        if (k == SEC_COUNT) {
+            add_error(A, s->line, 1, "only the .text, .data and .bss sections are supported, not '%.*s'", n->len, n->s);
+            s->kind = K_ERROR;
+            return;
+        }
+        if (end - i > 2) {
+            add_error(A, s->line, 1, "section attributes (align=, start=, vstart=...) are not supported");
+            s->kind = K_ERROR;
+            return;
+        }
+        s->kind = K_SECTION;
+        s->section = (uint8_t)k;
         return;
+    }
     }
 
     if (in_list(t, UNSUPPORTED_8086)) {
@@ -1536,13 +1568,14 @@ static void parse_line(asm_t *A, int beg, int end, int line)
 
 static void out_bytes(asm_t *A, const uint8_t *b, size_t n)
 {
-    if (!A->final) return;
-    if (A->outlen + n > A->outcap) {
-        while (A->outlen + n > A->outcap) A->outcap = A->outcap ? A->outcap * 2 : 4096;
-        A->out = (uint8_t *)realloc(A->out, A->outcap);
+    size_t k;
+    if (!A->final || A->sec == SEC_BSS) { A->wpos += (int64_t)n; return; }
+    for (k = 0; k < n; k++, A->wpos++) {
+        int64_t at = A->wpos - A->org;
+        if (at < 0 || at > 0xFFFF) continue;   /* reported: does not fit in 64 KB */
+        A->out[at] = b[k];
+        if ((size_t)at + 1 > A->outlen) A->outlen = (size_t)at + 1;
     }
-    memcpy(A->out + A->outlen, b, n);
-    A->outlen += n;
 }
 
 static void out_zero(asm_t *A, size_t n)
@@ -1616,6 +1649,12 @@ static void record_line(asm_t *A, stmt_t *s, int64_t start, int64_t size)
 static void run_pass(asm_t *A)
 {
     int k;
+    /* the sections, with the sizes of the last pass */
+    A->sec_base[SEC_TEXT] = A->org;
+    A->sec_base[SEC_DATA] = (A->sec_base[SEC_TEXT] + A->sec_size[SEC_TEXT] + 3) & ~(int64_t)3;
+    A->sec_base[SEC_BSS] = (A->sec_base[SEC_DATA] + A->sec_size[SEC_DATA] + 3) & ~(int64_t)3;
+    for (k = 0; k < SEC_COUNT; k++) A->sec_addr[k] = A->sec_base[k];
+    A->sec = SEC_TEXT;
     A->addr = A->org;
     A->last_global = -1;
     A->changed = 0;
@@ -1650,11 +1689,18 @@ static void run_pass(asm_t *A)
             }
             if (A->org_set && A->org_set != s->line) { add_error(A, s->line, 0, "only one ORG is allowed"); break; }
             if (v.v < 0 || v.v > 0xFFFF) { add_error(A, s->line, 0, "ORG out of range"); break; }
+            if (A->sec != SEC_TEXT) { add_error(A, s->line, 0, "ORG goes in the .text section"); break; }
             A->org_set = s->line;
             if (A->org != v.v) { A->org = v.v; A->changed = 1; }
             A->addr = A->org;
+            A->sec_base[SEC_TEXT] = A->org;
             break;
         }
+        case K_SECTION:
+            A->sec_addr[A->sec] = A->addr;
+            A->sec = s->section;
+            A->addr = A->sec_addr[A->sec];
+            break;
         case K_EQU: {
             int err;
             val_t v = eval_range(A, s->args_beg, s->args_end, s->line, &err);
@@ -1665,9 +1711,14 @@ static void run_pass(asm_t *A)
             break;
         }
         default:
+            if (A->sec == SEC_BSS && s->kind != K_RESB && s->kind != K_RESW) {
+                add_error(A, s->line, 0, "only RESB and RESW go in .bss (it takes no room in the file)");
+                break;
+            }
             if (s->times_beg >= 0) reps = eval_count(A, s, s->times_beg, s->times_end, "TIMES");
             for (r = 0; r < reps; r++) {
                 int64_t sz = 0;
+                A->wpos = A->addr;
                 if (s->kind == K_INSTR) {
                     enc_t e;
                     e.n = 0;
@@ -1694,6 +1745,11 @@ static void run_pass(asm_t *A)
             add_error(A, s->line, 0, "the program does not fit in a 64 KB segment");
             return;
         }
+    }
+    A->sec_addr[A->sec] = A->addr;
+    for (k = 0; k < SEC_COUNT; k++) {
+        int64_t size = A->sec_addr[k] - A->sec_base[k];
+        if (size != A->sec_size[k]) { A->sec_size[k] = size; A->changed = 1; }
     }
 }
 
@@ -1732,6 +1788,7 @@ int asm86_assemble(const char *source, asm86_result_t *res)
             if (!A.changed && A.pass > 0) { stable = 1; break; }
         }
         A.final = 1;
+        A.out = (uint8_t *)calloc(0x10000, 1);
         A.outlen = 0;
         A.nlines = 0;
         A.pass++;

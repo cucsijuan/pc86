@@ -180,6 +180,24 @@ class Gen:
             return f"{self.c(['lds', 'les'])} {self.c(R16)}, {self.mem(2 if r.random() < 0.05 else None)}"
         return f"{self.c(['add', 'sub', 'cmp'])} {self.c(R16)}, {self.c(['KA', 'KB', 'FWDK', 'dat', 'byte 3'])}"
 
+    def sections(self, b):
+        """Some data in .data and .bss, then back to .text and code using it."""
+        r, out, used = self.r, [], []
+        if r.random() < 0.7:
+            out += ["section .data", f"dvar{b}:"]
+            out += ["    " + self.c([f"db {self.imm8()}", "db 'abc', 0", f"dw {self.imm16()}", "dw $ - $$",
+                                     f"dw dvar{b}", f"times {self.c(['1', '3', '7'])} db 9", "db 1, 2, 3, 4, 5"])
+                    for _ in range(r.randrange(1, 4))]
+            used.append(f"dvar{b}")
+        if r.random() < 0.6:
+            out += ["section .bss", f"bvar{b}: {self.c(['resb', 'resw'])} {self.c(['1', '2', '3', '100', 'KA'])}"]
+            used.append(f"bvar{b}")
+        out.append(self.c(["section .text", "segment .text"]))
+        for v in used:
+            out.append("    " + self.c([f"mov ax, {v}", f"mov [{v}], al", f"mov bx, [{v}+1]", f"inc word [{v}]",
+                                        f"mov si, {v} - $$", f"dw {v}"]))
+        return out
+
     def program(self):
         r = self.r
         lines = ["cpu 8086", "org 100h" if r.random() < 0.8 else f"org {self.c(['0', '7C00h', '200h'])}",
@@ -196,6 +214,8 @@ class Gen:
             lines += ["    " + x for x in body]
             if r.random() < 0.2:
                 lines.append(f"    times {self.c(['100', '200', '130'])} nop")
+            if r.random() < 0.3:
+                lines += self.sections(b)
         lines += ["dat: dw 1, 2, 3", "    db 'texto$'", "data_end:", "FWDK equ 7"]
         return "\n".join(lines) + "\n"
 

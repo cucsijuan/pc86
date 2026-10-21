@@ -139,14 +139,15 @@ Cycle timing, the prefetch queue and the single-step trap (TF) are not emulated.
 
 - Labels with or without `:`, local labels (`.loop`, attached to the previous normal label) and `;` comments. As in NASM, labels may contain accented letters.
 - Numbers `123`, `0x1F`, `1Fh`, `$1F`, `0b101`, `101b`, `17q`, `0o17`, and characters `'A'`, `'AB'`.
-- Expressions `+ - * / // % %% << >> & | ^ ~ ! ( )`, with `$` (start of the line) and `$$` (start of the program).
+- Expressions `+ - * / // % %% << >> & | ^ ~ ! ( )`, with `$` (start of the line) and `$$` (start of the section).
 - Directives `org`, `db`, `dw`, `resb`, `resw`, `times`, `equ`, `bits 16`, `cpu 8086`.
+- Sections as in NASM's flat binary output: `section .text`, `.data` and `.bss` (or `segment`), in any order and as many times as wanted. The output has `.text`, then `.data` from the next multiple of 4 (with zeros in between), and `.bss` after it takes addresses but no room in the file: only `resb`/`resw` go there.
 - Operands: registers, immediates, `[bx+si+disp]`, `[es:di]`, `byte`/`word`, `short`/`near` on jumps.
 - Far jumps and calls, as in NASM: `jmp 0000h:7C00h`, `call 1234h:label`, `call far [bx]`, `jmp far [si]`; also `retf`, `retf 4`, `lds si, [bx]`, `les di, [label]`.
 - Prefixes `rep`, `repe`, `repz`, `repne`, `repnz`.
 - Every instruction the CPU supports, always choosing the same encoding as NASM: short jumps when they fit, sign-extended 8-bit immediates when they fit, 16-bit displacements when a label is involved, and so on.
 
-Not included: macros and the preprocessor (`%define`, `%macro`, `%include`), `section`, `dd`/`dq`, backquote strings and `strict`. All of these give a clear error.
+Not included: macros and the preprocessor (`%define`, `%macro`, `%include`), other sections and section attributes (`align=`, `vstart=`...), `dd`/`dq`, backquote strings and `strict`. All of these give a clear error. Object files (`-f obj`) and a linker, for .EXE programs built from several sources, are on the roadmap.
 
 Like NASM, it requires a size when it cannot be inferred from a register (`inc word [si]`, `push word [bx]`, `mov byte [di], 5`).
 

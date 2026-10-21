@@ -681,17 +681,19 @@ function putText(name, text) {
 ui.diskDos.addEventListener("click", () => {
   if (w.web_disk_modified() && !confirm("The diskette has changes that were not saved. Replace it with a COS system diskette?")) return;
   w.web_disk_new(0);
-  const files = [["COS.SYS", COS.kernel], ["COMMAND.COM", COS.command], ["ASM.COM", COS.asm], ["EDIT.COM", COS.edit]];
+  const files = [["COS.SYS", COS.kernel], ["COMMAND.COM", COS.command], ["ASM.COM", COS.asm], ["EDIT.COM", COS.edit],
+                 ["BASIC.COM", COS.basic]];
   for (const [key, name] of Object.entries(COS_PROGRAMS)) files.push([name, EXAMPLES[key].source]);
   let failed = "";
   for (const [name, text] of files) if (!putFile(name, text)) { failed = name; break; }
   if (!failed && !putText("HELLO.ASM", COS.hello)) failed = "HELLO.ASM";
+  if (!failed && !putText("APES.BAS", COS.apes)) failed = "APES.BAS";
   if (!failed && !(assembleText(COS.boot) && w.web_disk_put_boot() === 0)) failed = "the boot sector";
   syncDisk();
   if (failed) { diskNote("The COS diskette could not be made: " + failed + " did not assemble or did not fit."); return; }
-  diskNote("A COS system diskette is in drive A: COS.SYS, COMMAND.COM, the assembler (ASM), the editor (EDIT) " +
-           "and some of the examples. The machine boots from it; type DIR, or a program's name. " +
-           "To write a program: EDIT HELLO.ASM, then ASM HELLO, then HELLO.");
+  diskNote("A COS system diskette is in drive A: COS.SYS, COMMAND.COM, the assembler (ASM), the editor (EDIT), " +
+           "CBasic (BASIC) and some of the examples. The machine boots from it; type DIR, or a program's name. " +
+           "To write a program: EDIT HELLO.ASM, then ASM HELLO, then HELLO. To play the BASIC demo: BASIC APES.");
   bootFromA();
   ui.screen.focus();
 });

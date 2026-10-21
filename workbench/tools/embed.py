@@ -54,7 +54,8 @@ def old_versions(root, path, current):
 
 # COS (from sw86): the parts of a system diskette
 COS = [("boot", "dos/boot.asm"), ("kernel", "dos/cos.asm"), ("command", "dos/command.asm"),
-       ("asm", "dos/asm.asm"), ("edit", "dos/edit.asm"), ("hello", "programs/hello/hello.asm")]
+       ("asm", "dos/asm.asm"), ("edit", "dos/edit.asm"), ("basic", "dos/basic.asm"),
+       ("hello", "programs/hello/hello.asm"), ("apes", "dos/apes.bas")]
 
 
 def main():

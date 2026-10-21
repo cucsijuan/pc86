@@ -21,7 +21,7 @@
 
 #define WEB(name) __attribute__((export_name(#name))) name
 
-#define SRC_CAP (256 * 1024)
+#define SRC_CAP (512 * 1024)
 
 /* What the page shows next to the run light. */
 enum {

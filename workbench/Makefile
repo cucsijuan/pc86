@@ -27,7 +27,8 @@ SRC := src/web.c \
 
 HEADERS := $(wildcard $(ROOT)/*/include/*.h $(ROOT)/vga86/src/*.h $(ROOT)/fdc86/src/*.h)
 EXAMPLES := $(wildcard $(ROOT)/*/examples/*.asm examples/*.asm)
-COS    := $(wildcard $(SW86)/dos/boot.asm $(SW86)/dos/cos.asm $(SW86)/dos/command.asm)
+COS    := $(wildcard $(SW86)/dos/boot.asm $(SW86)/dos/cos.asm $(SW86)/dos/command.asm \
+                    $(SW86)/dos/asm.asm $(SW86)/dos/edit.asm $(SW86)/programs/hello/hello.asm)
 
 all: index.html
 

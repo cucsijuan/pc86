@@ -17,6 +17,8 @@
  * --type types TEXT on the keyboard, one key each time the BIOS keyboard
  *   buffer is empty. \n is Enter, \b Backspace, \e Escape, \t Tab, \c
  *   Ctrl+C, \\ a backslash; other control characters are Ctrl + a letter.
+ *   \{Name} is any other key by its name (\{F2}, \{ArrowUp}, \{Delete}),
+ *   with Ctrl+ or Shift+ in front if it is held (\{Ctrl+Home}).
  * --until stops once TEXT has been typed and TEXT is on the cursor's row.
  * --text prints the text screen at the end.
  * --every N saves a screenshot every N frames (60 frames per second).
@@ -119,6 +121,11 @@ enum { MOD_NONE, MOD_SHIFT, MOD_CTRL };
 /* Not keys: in the --type text, change the diskette in A: or B: */
 #define SWAP_A 28
 #define SWAP_B 29
+/* In the --type text: a key by its name; the next byte is 1 + its place in named[] */
+#define NAMED  30
+
+static struct { uint16_t key; int mod; } named[255];
+static int named_count;
 
 /* US layout: the key for a character, and the modifier it needs. */
 static uint16_t key_for(char c, int *shift)
@@ -162,6 +169,30 @@ static char *unescape(const char *s)
         case 'c': *o++ = 3; break;
         case '1': *o++ = SWAP_A; break;
         case '2': *o++ = SWAP_B; break;
+        case '{': {                    /* \{Ctrl+Name} */
+            const char *end = strchr(s, '}');
+            char name[32];
+            int mod = MOD_NONE, n;
+            uint16_t key;
+            if (!end || end - s - 1 >= (int)sizeof(name)) { free(out); return NULL; }
+            n = (int)(end - s - 1);
+            memcpy(name, s + 1, (size_t)n);
+            name[n] = 0;
+            if (!strncmp(name, "Ctrl+", 5)) { mod = MOD_CTRL; memmove(name, name + 5, strlen(name + 5) + 1); }
+            else if (!strncmp(name, "Shift+", 6)) { mod = MOD_SHIFT; memmove(name, name + 6, strlen(name + 6) + 1); }
+            if (!(key = kbd_key_from_code(name))) { free(out); return NULL; }
+            for (n = 0; n < named_count && (named[n].key != key || named[n].mod != mod); n++) {}
+            if (n == named_count) {
+                if (n == 255) { free(out); return NULL; }
+                named[n].key = key;
+                named[n].mod = mod;
+                named_count++;
+            }
+            *o++ = NAMED;
+            *o++ = (char)(n + 1);
+            s = end;
+            break;
+        }
         default:  *o++ = *s; break;
         }
     }
@@ -241,7 +272,9 @@ int main(int argc, char **argv)
             else if (argv[i][0] == 'b' || argv[i][0] == 'B') protect[1] = 1;
         }
         else if (!strcmp(argv[i], "--save")) save_disks = 1;
-        else if (!strcmp(argv[i], "--type") && i + 1 < argc) keys = unescape(argv[++i]);
+        else if (!strcmp(argv[i], "--type") && i + 1 < argc) {
+            if (!(keys = unescape(argv[++i]))) { fprintf(stderr, "--type: unknown key in \\{...}\n"); return 2; }
+        }
         else if (!strcmp(argv[i], "--until") && i + 1 < argc) until = argv[++i];
         else if (!strcmp(argv[i], "--text")) show_text = 1;
         else if (argv[i][0] != '-' && !path) path = argv[i];
@@ -311,8 +344,14 @@ int main(int argc, char **argv)
                 if (disk[d + 2]) fdd_insert(drive[d], disk[d + 2]);
             }
         } else if (keys && keys[typed] && f > 6 && m[0x41A] == m[0x41C]) {
-            held_key = key_for(keys[typed], &shift);
-            if (!held_key) { fprintf(stderr, "cannot type character %02Xh\n", (uint8_t)keys[typed]); return 2; }
+            if (keys[typed] == NAMED) {
+                int k = (uint8_t)keys[++typed] - 1;
+                held_key = named[k].key;
+                shift = named[k].mod;
+            } else {
+                held_key = key_for(keys[typed], &shift);
+                if (!held_key) { fprintf(stderr, "cannot type character %02Xh\n", (uint8_t)keys[typed]); return 2; }
+            }
             if (shift) kbd_key(kbd, kbd_key_from_code(shift == MOD_CTRL ? "ControlLeft" : "ShiftLeft"), 1);
             kbd_key(kbd, held_key, 1);
             held = 1;

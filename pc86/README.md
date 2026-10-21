@@ -76,7 +76,7 @@ build/pcrun --a system.img --b data.img --type "dir b:\n" --until "A:\>" --text
 | `--a2` / `--b2 image` | a second diskette, put in the drive instead of the first one when `--type` reaches `\1` (A:) or `\2` (B:) |
 | `--protect a\|b` | the write-protect tab of that diskette |
 | `--save` | writes the images back if the machine changed them |
-| `--type TEXT` | types TEXT, a key each time the BIOS keyboard buffer is empty: `\n` Enter, `\b` Backspace, `\e` Escape, `\t` Tab, `\c` Ctrl+C, `\\` a backslash |
+| `--type TEXT` | types TEXT, a key each time the BIOS keyboard buffer is empty: `\n` Enter, `\b` Backspace, `\e` Escape, `\t` Tab, `\c` Ctrl+C, `\\` a backslash, `\{Name}` any other key by its name (`\{F2}`, `\{ArrowUp}`, `\{Ctrl+Home}`) |
 | `--until TEXT` | stops when everything has been typed and TEXT is on the cursor's row (exit code 3 if that never happens) |
 | `--text` | prints the text screen at the end |
 

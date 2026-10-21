@@ -653,9 +653,10 @@ ui.diskNew.addEventListener("click", () => {
   diskNote("A new formatted 1.44 MB diskette is in drive A:.");
   syncDisk();
 });
-// A COS system diskette, made in the page: the kernel, COMMAND.COM and some
-// of the examples assembled onto a new diskette, the boot sector installed,
-// then the machine boots from it.
+// A COS system diskette, made in the page: the kernel, COMMAND.COM, the
+// assembler, the editor and some of the examples assembled onto a new
+// diskette, with HELLO.ASM to start from, the boot sector installed, then the
+// machine boots from it.
 const COS_PROGRAMS = {
   hello: "HELLO.COM", numbers: "NUMBERS.COM", factorial: "FACTOR.COM", sort: "SORT.COM", strings: "STRINGS.COM"
 };
@@ -670,18 +671,27 @@ function putFile(name, text) {
   new Uint8Array(w.memory.buffer).set(new TextEncoder().encode(name + "\0"), w.web_scratch());
   return assembleText(text) && w.web_disk_put_program() === 0;
 }
+// A text file (lines ending in CR LF, as on DOS): its bytes as DB lines
+function putText(name, text) {
+  const { bytes } = encodeCP437(text.replace(/\r?\n/g, "\r\n"));
+  const lines = [];
+  for (let i = 0; i < bytes.length; i += 16) lines.push("db " + Array.from(bytes.subarray(i, i + 16)).join(","));
+  return putFile(name, lines.join("\n") + "\n");
+}
 ui.diskDos.addEventListener("click", () => {
   if (w.web_disk_modified() && !confirm("The diskette has changes that were not saved. Replace it with a COS system diskette?")) return;
   w.web_disk_new(0);
-  const files = [["COS.SYS", COS.kernel], ["COMMAND.COM", COS.command]];
+  const files = [["COS.SYS", COS.kernel], ["COMMAND.COM", COS.command], ["ASM.COM", COS.asm], ["EDIT.COM", COS.edit]];
   for (const [key, name] of Object.entries(COS_PROGRAMS)) files.push([name, EXAMPLES[key].source]);
   let failed = "";
   for (const [name, text] of files) if (!putFile(name, text)) { failed = name; break; }
+  if (!failed && !putText("HELLO.ASM", COS.hello)) failed = "HELLO.ASM";
   if (!failed && !(assembleText(COS.boot) && w.web_disk_put_boot() === 0)) failed = "the boot sector";
   syncDisk();
   if (failed) { diskNote("The COS diskette could not be made: " + failed + " did not assemble or did not fit."); return; }
-  diskNote("A COS system diskette is in drive A: COS.SYS, COMMAND.COM and some of the examples. " +
-           "The machine boots from it; type DIR, or a program's name.");
+  diskNote("A COS system diskette is in drive A: COS.SYS, COMMAND.COM, the assembler (ASM), the editor (EDIT) " +
+           "and some of the examples. The machine boots from it; type DIR, or a program's name. " +
+           "To write a program: EDIT HELLO.ASM, then ASM HELLO, then HELLO.");
   bootFromA();
   ui.screen.focus();
 });

@@ -1306,9 +1306,22 @@ static int encode_instr(asm_t *A, stmt_t *s, enc_t *e)
     case M_JCC:
         NEED(1);
         if (o[0].type != O_IMM) { add_error(A, line, 0, "conditional jumps only accept a label as target"); return 0; }
-        if (o[0].jmod == J_NEAR) { add_error(A, line, 0, "NEAR conditional jumps are 80386+; on the 8086 they are always short (-128..127)"); return 0; }
+        if (o[0].jmod == J_NEAR) {
+            /* The 8086 has only short conditional jumps (and NASM refuses
+             * NEAR ones for it): NEAR is the short jump when the target is
+             * close, else the opposite condition over a near JMP. */
+            int64_t rel = o[0].imm.v - (A->addr + e->n + 2);
+            if (!(s->sticky & 1) && (o[0].imm.unknown || fits_s8(rel))) {
+                encode_rel8(A, s, e, 0x70 + s->mnem->cc_or_byte, &o[0], "conditional jump", "");
+                return 1;
+            }
+            if (A->pass >= STICKY_PASS) s->sticky |= 1;
+            eb(e, 0x70 + (s->mnem->cc_or_byte ^ 1)); eb(e, 3); eb(e, 0xE9);
+            ew(e, o[0].imm.v - (A->addr + e->n + 2));
+            return 1;
+        }
         encode_rel8(A, s, e, 0x70 + s->mnem->cc_or_byte, &o[0], "conditional jump",
-                    ". To go further, invert the condition and jump over a JMP");
+                    ". To go further, write NEAR (je near label)");
         return 1;
 
     case M_LOOP: case M_LOOPE: case M_LOOPNE: case M_JCXZ:

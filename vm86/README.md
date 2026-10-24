@@ -113,7 +113,7 @@ Errors are reported **all at once, sorted by line**, with hints on how to fix th
 ```
 3: the 8086 cannot load an immediate into a segment register; go through a register (mov ax, value / mov es, ax)
 4: the 8086 can only shift by 1 or by CL (e.g. mov cl, 4 / shl ax, cl)
-7: conditional jump out of range: target is 300 bytes away and the limit is -128..127. To go further, invert the condition and jump over a JMP
+7: conditional jump out of range: target is 300 bytes away and the limit is -128..127. To go further, write NEAR (je near label)
 8: instruction not supported on this machine: daa
 ```
 
@@ -146,8 +146,9 @@ Cycle timing, the prefetch queue and the single-step trap (TF) are not emulated.
 - Far jumps and calls, as in NASM: `jmp 0000h:7C00h`, `call 1234h:label`, `call far [bx]`, `jmp far [si]`; also `retf`, `retf 4`, `lds si, [bx]`, `les di, [label]`.
 - Prefixes `rep`, `repe`, `repz`, `repne`, `repnz`.
 - Every instruction the CPU supports, always choosing the same encoding as NASM: short jumps when they fit, sign-extended 8-bit immediates when they fit, 16-bit displacements when a label is involved, and so on.
+- `je near label` and the other conditional jumps with `near`, which NASM refuses for the 8086 (its conditional jumps are only short): the short jump when the target is within -128..127, otherwise the opposite condition over a near `jmp` (`jne $+5` / `jmp near label`, 5 bytes). Compilers use it for jumps whose distance they do not know.
 
-Not included: macros and the preprocessor (`%define`, `%macro`, `%include`), other sections and section attributes (`align=`, `vstart=`...), `dd`/`dq`, backquote strings and `strict`. All of these give a clear error. Object files (`-f obj`) and a linker, for .EXE programs built from several sources, are on the roadmap.
+Not included: macros and the preprocessor (`%define`, `%macro`, `%include`), other sections and section attributes (`align=`, `vstart=`...), `dd`/`dq`, backquote strings and `strict`. All of these give a clear error. Object files (`-f obj`) and a linker are not included: sw86's C compiler puts programs of several files together as assembler source, and writes the header of an .EXE itself.
 
 Like NASM, it requires a size when it cannot be inferred from a register (`inc word [si]`, `push word [bx]`, `mov byte [di], 5`).
 

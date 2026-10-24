@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Checks that unsupported or non-8086 code produces a clear error on the right
-line. Usage: python3 tests/asm_errors.py [--asm build/asm86]
+line, and the bytes of what asm86 has beyond NASM (conditional jumps with
+NEAR). Usage: python3 tests/asm_errors.py [--asm build/asm86]
 """
 import argparse, os, subprocess, sys, tempfile
 
@@ -61,7 +62,6 @@ CASES = [
     ("lea ax, bx", 1, "LEA"),
     ("int 300", 1, "0..255"),
     ("jz far_away\ntimes 200 nop\nfar_away:", 1, "out of range"),
-    ("jz near x\nx:", 1, "NEAR"),
     ("loop x\ntimes 130 nop\nx:", 1, "out of range"),
     ("times -1 nop", 1, "negative"),
     ("nop\nnop\nnop\nmov ax, [cx]", 4, "BX, BP, SI and DI"),
@@ -70,6 +70,14 @@ CASES = [
     ("org 100h\nnop\norg 200h", 3, "ORG"),
     ("mov ax, bx, cx", 1, "operand"),
     ("add", 1, "takes 2 operands"),
+]
+
+# (source, the bytes it must give): NEAR conditional jumps, short or long
+BYTES = [
+    ("a: jz near a", "74fe"),
+    ("jz near x\nx:", "7400"),
+    ("jl near x\ntimes 200 nop\nx:", "7d03e9c800" + "90" * 200),
+    ("x: times 200 nop\njne near x", "90" * 200 + "7403e933ff"),
 ]
 
 
@@ -89,7 +97,17 @@ def main():
             bad += 1
             print(f"FAIL: {src!r}\n   expected line {line} containing '{text}'\n   got: {p.stderr.strip() or '(no error)'}")
     print(f"Error cases: {len(CASES) - bad}/{len(CASES)} passed")
-    return 1 if bad else 0
+    worse = bad
+    bad = 0
+    for src, want in BYTES:
+        open(path, "w").write(src + "\n")
+        p = subprocess.run([args.asm, path, "-o", path + ".com"], capture_output=True, text=True)
+        got = open(path + ".com", "rb").read().hex() if p.returncode == 0 else p.stderr.strip()
+        if got != want:
+            bad += 1
+            print(f"FAIL: {src!r}\n   expected {want}\n   got: {got}")
+    print(f"NEAR conditional jumps: {len(BYTES) - bad}/{len(BYTES)} passed")
+    return 1 if bad or worse else 0
 
 
 if __name__ == "__main__":
